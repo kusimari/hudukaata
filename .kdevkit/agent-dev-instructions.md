@@ -30,13 +30,13 @@ ruff format --check src/ tests/
 ruff format src/ tests/
 
 # Type check
-mypy src/indexer
+python -m mypy src/indexer
 
 # Tests (use python -m pytest to ensure the correct interpreter)
 python -m pytest tests/ -v
 
 # Full local quality gate (equivalent to CI)
-ruff check src/ tests/ && ruff format --check src/ tests/ && mypy src/indexer && python -m pytest tests/ -v
+ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/indexer && python -m pytest tests/ -v
 ```
 
 ## Mandatory workflow after every code change

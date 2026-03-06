@@ -45,7 +45,7 @@ jobs:
         run: ruff format --check src/ tests/
 
       - name: mypy
-        run: mypy src/indexer
+        run: python -m mypy src/indexer
 
   test:
     name: test
