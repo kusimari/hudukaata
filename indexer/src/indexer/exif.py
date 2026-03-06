@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 
 from indexer.scanner import MediaFile
+
+logger = logging.getLogger(__name__)
 
 
 def extract_exif(mf: MediaFile) -> dict[str, str]:
@@ -40,28 +43,29 @@ def _extract_image(path: Path) -> dict[str, str]:
         for key, val in tags.items():
             clean_key = key.replace(" ", "_").replace("/", "_")
             result[clean_key] = str(val)
+    except (OSError, ValueError):
+        logger.debug("exifread failed for %s", path, exc_info=True)
     except Exception:
-        pass
+        logger.warning("Unexpected error from exifread for %s", path, exc_info=True)
 
     # Pillow for basic image attributes and GPS
     try:
         from PIL import Image
         from PIL.ExifTags import TAGS
 
-        img = Image.open(path)
-        result["width"] = str(img.width)
-        result["height"] = str(img.height)
-        result["format"] = img.format or ""
+        with Image.open(path) as img:
+            result["width"] = str(img.width)
+            result["height"] = str(img.height)
+            result["format"] = img.format or ""
 
-        raw_exif = img._getexif()
-        if raw_exif:
+            raw_exif = img.getexif()
             for tag_id, value in raw_exif.items():
                 tag_name = TAGS.get(tag_id, str(tag_id))
                 if isinstance(value, bytes):
                     continue
                 result.setdefault(str(tag_name), str(value))
     except Exception:
-        pass
+        logger.debug("Pillow EXIF extraction failed for %s", path, exc_info=True)
 
     return result
 
@@ -108,7 +112,7 @@ def _extract_video(path: Path) -> dict[str, str]:
                 break
 
     except Exception:
-        pass
+        logger.debug("ffprobe failed for %s", path, exc_info=True)
 
     return result
 
@@ -139,6 +143,6 @@ def _extract_audio(path: Path) -> dict[str, str]:
             result[clean_key] = str(val[0] if isinstance(val, list) else val)
 
     except Exception:
-        pass
+        logger.debug("mutagen failed for %s", path, exc_info=True)
 
     return result

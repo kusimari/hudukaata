@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -22,7 +23,7 @@ def jpeg_file(tmp_path) -> Path:
     return path
 
 
-def _mf(path: Path, media_type="image") -> MediaFile:
+def _mf(path: Path, media_type: Literal["image", "video", "audio"] = "image") -> MediaFile:
     return MediaFile(relative_path=path.name, local_path=path, media_type=media_type)
 
 

@@ -42,7 +42,7 @@ AUDIO_EXTENSIONS = {
     ".wma",
 }
 
-_EXT_TO_TYPE: dict[str, str] = {
+_EXT_TO_TYPE: dict[str, Literal["image", "video", "audio"]] = {
     **{ext: "image" for ext in IMAGE_EXTENSIONS},
     **{ext: "video" for ext in VIDEO_EXTENSIONS},
     **{ext: "audio" for ext in AUDIO_EXTENSIONS},
@@ -66,5 +66,5 @@ def scan(pointer: MediaPointer) -> Iterator[MediaFile]:
         yield MediaFile(
             relative_path=relative_path,
             local_path=local_path,
-            media_type=media_type,  # type: ignore[arg-type]
+            media_type=media_type,
         )

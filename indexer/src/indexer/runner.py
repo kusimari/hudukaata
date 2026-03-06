@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -32,11 +33,32 @@ def run(
     cleanup_stale_tmp(store)
 
     local_tmp = Path(tempfile.mkdtemp(prefix="indexer_run_"))
+    try:
+        _run(media, store, caption_model, vectorizer, vector_store, local_tmp)
+    finally:
+        shutil.rmtree(local_tmp, ignore_errors=True)
+
+
+def _run(
+    media: MediaPointer,
+    store: MediaPointer,
+    caption_model: CaptionModel,
+    vectorizer: Vectorizer,
+    vector_store: VectorStore,
+    local_tmp: Path,
+) -> None:
     existing_created_at: datetime | None = None
 
     if store.has_dir("db"):
-        local_db = store.get_dir("db")
-        existing_created_at = vector_store.created_at(local_db)
+        # For rclone pointers, get_dir downloads the DB to a temp dir that
+        # the caller must clean up. We read created_at only; the DB itself
+        # is always rebuilt from scratch (no incremental indexing).
+        _existing_db_path = store.get_dir("db")
+        try:
+            existing_created_at = vector_store.created_at(_existing_db_path)
+        finally:
+            if store.scheme == "rclone":
+                shutil.rmtree(_existing_db_path, ignore_errors=True)
         logger.info(
             "Existing DB found (created at %s); rebuilding from scratch.", existing_created_at
         )
@@ -50,10 +72,14 @@ def run(
 
     for mf in tqdm(media_files, desc="Indexing", unit="file"):
         logger.debug("Processing %s", mf.relative_path)
-        caption = caption_model.caption(mf)
-        exif = extract_exif(mf)
-        text = format_text(caption, exif)
-        vector = vectorizer.vectorize(text)
+        try:
+            caption = caption_model.caption(mf)
+            exif = extract_exif(mf)
+            text = format_text(caption, exif)
+            vector = vectorizer.vectorize(text)
+        except Exception as exc:
+            logger.warning("Skipping %s: %s", mf.relative_path, exc)
+            continue
         metadata: dict[str, str] = {"caption": caption, **exif}
         vector_store.add(mf.relative_path, vector, metadata)
 

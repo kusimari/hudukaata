@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,8 @@ class ChromaVectorStore(VectorStore):
         self.collection_name = collection_name
         self._client: Any = None
         self._collection: Any = None
+        # Temp directory used by create_empty(); moved to final path in save().
+        self._tmp_dir: Path | None = None
 
     # ------------------------------------------------------------------
     # VectorStore interface
@@ -26,12 +30,9 @@ class ChromaVectorStore(VectorStore):
         import chromadb
         from chromadb.config import Settings
 
-        self._client = chromadb.Client(
-            Settings(
-                chroma_db_impl="duckdb+parquet",
-                persist_directory=str(local_path),
-                anonymized_telemetry=False,
-            )
+        self._client = chromadb.PersistentClient(
+            path=str(local_path),
+            settings=Settings(anonymized_telemetry=False),
         )
         self._collection = self._client.get_or_create_collection(self.collection_name)
 
@@ -39,14 +40,21 @@ class ChromaVectorStore(VectorStore):
         import chromadb
         from chromadb.config import Settings
 
-        self._client = chromadb.Client(
-            Settings(
-                chroma_db_impl="duckdb+parquet",
-                persist_directory=None,
-                anonymized_telemetry=False,
+        # Use a PersistentClient in a temp dir so data is on disk and can be
+        # moved atomically to the final location in save().
+        tmp_dir = Path(tempfile.mkdtemp(prefix="indexer_chroma_"))
+        try:
+            client = chromadb.PersistentClient(
+                path=str(tmp_dir),
+                settings=Settings(anonymized_telemetry=False),
             )
-        )
-        self._collection = self._client.create_collection(self.collection_name)
+            collection = client.create_collection(self.collection_name)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        self._tmp_dir = tmp_dir
+        self._client = client
+        self._collection = collection
 
     def add(
         self,
@@ -63,10 +71,13 @@ class ChromaVectorStore(VectorStore):
         )
 
     def save(self, local_path: Path) -> None:
-        if self._client is None:
-            raise RuntimeError("Store not initialised")
-        local_path.mkdir(parents=True, exist_ok=True)
-        self._client.persist()
+        if self._client is None or self._tmp_dir is None:
+            raise RuntimeError("Store not initialised; call create_empty() before save()")
+        # PersistentClient auto-persists on write; just move the directory.
+        if local_path.exists():
+            shutil.rmtree(local_path)
+        shutil.move(str(self._tmp_dir), str(local_path))
+        self._tmp_dir = None
 
         # Write sidecar metadata
         meta = {"created_at": datetime.now(UTC).isoformat()}

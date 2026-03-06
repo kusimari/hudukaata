@@ -49,6 +49,11 @@ def commit(
     if store.has_dir("db"):
         date_str = (created_at or datetime.now(UTC)).strftime("%Y-%m-%d")
         archive_name = f"db_{date_str}"
+        # Avoid collision if an archive for this date already exists.
+        counter = 2
+        while store.has_dir(archive_name):
+            archive_name = f"db_{date_str}_{counter}"
+            counter += 1
         store.rename_dir("db", archive_name)
 
     # Promote db_new → db

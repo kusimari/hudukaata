@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from collections.abc import Iterator
@@ -31,13 +32,25 @@ class MediaPointer:
         """
         if uri.startswith("file://"):
             path = uri[len("file://") :]
+            if not path.startswith("/"):
+                raise ValueError(f"file:// URI must use an absolute path (got {uri!r})")
             return MediaPointer(scheme="file", remote=None, path=path)
 
         if uri.startswith("rclone:"):
             rest = uri[len("rclone:") :]
             # rest is  remote-name:///path  or  remote-name:/path
-            colon_pos = rest.index(":")
+            try:
+                colon_pos = rest.index(":")
+            except ValueError:
+                raise ValueError(
+                    f"Invalid rclone URI (missing path separator after remote name): {uri!r}"
+                ) from None
             remote = rest[:colon_pos]
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", remote):
+                raise ValueError(
+                    f"rclone remote name must contain only alphanumerics, hyphens, or underscores"
+                    f" (got {remote!r})"
+                )
             path_part = rest[colon_pos + 1 :]
             # Strip leading slashes to get a clean remote path
             path = path_part.lstrip("/")
@@ -57,23 +70,37 @@ class MediaPointer:
                 if p.is_file():
                     yield str(p.relative_to(root)), p
         else:
-            # List all files on the remote
+            # List all files on the remote and download them to a temp dir.
+            #
+            # Lifetime contract: the downloaded files must remain accessible
+            # until the caller has finished reading them. This generator uses
+            # try/finally so the tmpdir is cleaned up when the generator is
+            # closed (exhausted or garbage-collected). Callers that need the
+            # files to outlive generator exhaustion (e.g. runner._run, which
+            # calls list(scan(media)) and then processes files afterwards)
+            # must exhaust this generator *after* processing, or refactor to
+            # stream files one-at-a-time without collecting them first.
             entries = self._rclone_lsjson()
             tmpdir = Path(tempfile.mkdtemp(prefix="indexer_rclone_"))
-            for entry in entries:
-                if entry.get("IsDir"):
-                    continue
-                rel = entry["Path"]
-                local_dest = tmpdir / rel
-                local_dest.parent.mkdir(parents=True, exist_ok=True)
-                self._rclone_run(
-                    [
-                        "copyto",
-                        f"{self.remote}:{self.path}/{rel}",
-                        str(local_dest),
-                    ]
-                )
-                yield rel, local_dest
+            try:
+                for entry in entries:
+                    if entry.get("IsDir"):
+                        continue
+                    rel = entry["Path"]
+                    local_dest = tmpdir / rel
+                    local_dest.parent.mkdir(parents=True, exist_ok=True)
+                    self._rclone_run(
+                        [
+                            "copyto",
+                            f"{self.remote}:{self.path}/{rel}",
+                            str(local_dest),
+                        ]
+                    )
+                    yield rel, local_dest
+            finally:
+                import shutil
+
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
     # ------------------------------------------------------------------
     # Directory operations
