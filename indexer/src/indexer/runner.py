@@ -37,7 +37,9 @@ def run(
     if store.has_dir("db"):
         local_db = store.get_dir("db")
         existing_created_at = vector_store.created_at(local_db)
-        logger.info("Existing DB found (created at %s); rebuilding from scratch.", existing_created_at)
+        logger.info(
+            "Existing DB found (created at %s); rebuilding from scratch.", existing_created_at
+        )
 
     vector_store.create_empty()
 

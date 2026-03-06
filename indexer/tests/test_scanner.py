@@ -14,7 +14,7 @@ def media_dir(tmp_path):
         "photo.jpg": "image",
         "clip.mp4": "video",
         "song.mp3": "audio",
-        "readme.txt": None,   # should be ignored
+        "readme.txt": None,  # should be ignored
         "sub/nested.png": "image",
     }
     for rel, _ in files.items():

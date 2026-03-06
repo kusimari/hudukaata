@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -65,7 +64,7 @@ class TestRun:
             vector_store=vector_store,
         )
 
-        for doc_id, (vector, metadata) in vector_store.docs.items():
+        for doc_id, (_vector, metadata) in vector_store.docs.items():
             assert "caption" in metadata
             assert metadata["caption"] == doc_id  # StubCaptionModel returns path
 

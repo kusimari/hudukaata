@@ -17,15 +17,16 @@ starting.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import contextlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 from indexer.pointer import MediaPointer
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def prepare_temp_dir(store: MediaPointer, local_tmp: Path) -> None:
     """Ensure local_tmp exists and is empty, ready for writing db_new."""
@@ -46,7 +47,7 @@ def commit(
     """
     # Archive existing db
     if store.has_dir("db"):
-        date_str = (created_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+        date_str = (created_at or datetime.now(UTC)).strftime("%Y-%m-%d")
         archive_name = f"db_{date_str}"
         store.rename_dir("db", archive_name)
 
@@ -55,10 +56,8 @@ def commit(
         store.rename_dir("db_new", "db")
     except Exception:
         # Rename failed (e.g. rclone not available); clean up new dir
-        try:
+        with contextlib.suppress(Exception):
             store.delete_dir("db_new")
-        except Exception:
-            pass
         raise
 
 

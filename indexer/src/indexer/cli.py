@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+from typing import Any
 
 import click
 
@@ -27,7 +28,7 @@ _VECTOR_STORES: dict[str, type[VectorStore]] = {
 }
 
 
-def _resolve_class(name: str, registry: dict, kind: str):
+def _resolve_class(name: str, registry: dict[str, type[Any]], kind: str) -> Any:
     """Resolve a short name from the registry, or import a dotted path."""
     if name in registry:
         return registry[name]()
@@ -44,21 +45,39 @@ def _resolve_class(name: str, registry: dict, kind: str):
 
 
 @click.group()
-def main():
+def main() -> None:
     """hudukaata indexer — index media files into a vector database."""
 
 
 @main.command()
-@click.option("--media", required=True, help="Media directory pointer (file:// or rclone:remote:///path).")
-@click.option("--store", required=True, help="Store directory pointer (file:// or rclone:remote:///path).")
-@click.option("--caption-model", "caption_model_name", default="blip2", show_default=True,
-              help="Captioner class to use (short name or dotted import path).")
-@click.option("--vectorizer", "vectorizer_name", default="sentence-transformer", show_default=True,
-              help="Vectorizer class to use.")
-@click.option("--vector-store", "vector_store_name", default="chroma", show_default=True,
-              help="Vector store class to use.")
-@click.option("--log-level", default="INFO", show_default=True,
-              help="Logging level.")
+@click.option(
+    "--media", required=True, help="Media directory pointer (file:// or rclone:remote:///path)."
+)
+@click.option(
+    "--store", required=True, help="Store directory pointer (file:// or rclone:remote:///path)."
+)
+@click.option(
+    "--caption-model",
+    "caption_model_name",
+    default="blip2",
+    show_default=True,
+    help="Captioner class to use (short name or dotted import path).",
+)
+@click.option(
+    "--vectorizer",
+    "vectorizer_name",
+    default="sentence-transformer",
+    show_default=True,
+    help="Vectorizer class to use.",
+)
+@click.option(
+    "--vector-store",
+    "vector_store_name",
+    default="chroma",
+    show_default=True,
+    help="Vector store class to use.",
+)
+@click.option("--log-level", default="INFO", show_default=True, help="Logging level.")
 def index(
     media: str,
     store: str,
@@ -66,7 +85,7 @@ def index(
     vectorizer_name: str,
     vector_store_name: str,
     log_level: str,
-):
+) -> None:
     """Index media files from MEDIA pointer into STORE."""
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
 

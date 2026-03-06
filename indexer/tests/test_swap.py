@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
 
 from indexer.pointer import MediaPointer
 from indexer.swap import cleanup_stale_tmp, commit, prepare_temp_dir
@@ -55,7 +53,7 @@ class TestCommit:
         (store_root / "db_new").mkdir()
         (store_root / "db_new" / "new.txt").write_text("new")
 
-        ts = datetime(2024, 6, 15, tzinfo=timezone.utc)
+        ts = datetime(2024, 6, 15, tzinfo=UTC)
         local_tmp = tmp_path / "local"
         local_tmp.mkdir()
 

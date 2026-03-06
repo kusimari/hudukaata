@@ -5,23 +5,24 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Any, Literal
 
 
 @dataclass
 class MediaPointer:
     scheme: Literal["file", "rclone"]
     remote: str | None  # rclone remote name; None for file://
-    path: str           # absolute path (on FS or remote)
+    path: str  # absolute path (on FS or remote)
 
     # ------------------------------------------------------------------
     # Parsing
     # ------------------------------------------------------------------
 
     @staticmethod
-    def parse(uri: str) -> "MediaPointer":
+    def parse(uri: str) -> MediaPointer:
         """Parse a URI into a MediaPointer.
 
         Supported formats:
@@ -29,15 +30,15 @@ class MediaPointer:
           rclone:remote-name:///path/on/remote
         """
         if uri.startswith("file://"):
-            path = uri[len("file://"):]
+            path = uri[len("file://") :]
             return MediaPointer(scheme="file", remote=None, path=path)
 
         if uri.startswith("rclone:"):
-            rest = uri[len("rclone:"):]
+            rest = uri[len("rclone:") :]
             # rest is  remote-name:///path  or  remote-name:/path
             colon_pos = rest.index(":")
             remote = rest[:colon_pos]
-            path_part = rest[colon_pos + 1:]
+            path_part = rest[colon_pos + 1 :]
             # Strip leading slashes to get a clean remote path
             path = path_part.lstrip("/")
             return MediaPointer(scheme="rclone", remote=remote, path=path)
@@ -65,11 +66,13 @@ class MediaPointer:
                 rel = entry["Path"]
                 local_dest = tmpdir / rel
                 local_dest.parent.mkdir(parents=True, exist_ok=True)
-                self._rclone_run([
-                    "copyto",
-                    f"{self.remote}:{self.path}/{rel}",
-                    str(local_dest),
-                ])
+                self._rclone_run(
+                    [
+                        "copyto",
+                        f"{self.remote}:{self.path}/{rel}",
+                        str(local_dest),
+                    ]
+                )
                 yield rel, local_dest
 
     # ------------------------------------------------------------------
@@ -80,17 +83,20 @@ class MediaPointer:
         """Upload a local directory to this pointer location."""
         if self.scheme == "file":
             import shutil
+
             dest = Path(self.path) / (dest_name or local_src.name)
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.copytree(local_src, dest)
         else:
             remote_dest = f"{self.path}/{dest_name or local_src.name}"
-            self._rclone_run([
-                "copy",
-                str(local_src),
-                f"{self.remote}:{remote_dest}",
-            ])
+            self._rclone_run(
+                [
+                    "copy",
+                    str(local_src),
+                    f"{self.remote}:{remote_dest}",
+                ]
+            )
 
     def get_dir(self, name: str | None = None) -> Path:
         """Download the directory at this pointer into a local temp dir.
@@ -101,11 +107,13 @@ class MediaPointer:
             return Path(self.path) / name if name else Path(self.path)
         tmpdir = Path(tempfile.mkdtemp(prefix="indexer_get_"))
         remote_path = f"{self.path}/{name}" if name else self.path
-        self._rclone_run([
-            "copy",
-            f"{self.remote}:{remote_path}",
-            str(tmpdir),
-        ])
+        self._rclone_run(
+            [
+                "copy",
+                f"{self.remote}:{remote_path}",
+                str(tmpdir),
+            ]
+        )
         return tmpdir
 
     def has_dir(self, name: str) -> bool:
@@ -128,39 +136,47 @@ class MediaPointer:
             root = Path(self.path)
             (root / old).rename(root / new)
         else:
-            self._rclone_run([
-                "moveto",
-                f"{self.remote}:{self.path}/{old}",
-                f"{self.remote}:{self.path}/{new}",
-            ])
+            self._rclone_run(
+                [
+                    "moveto",
+                    f"{self.remote}:{self.path}/{old}",
+                    f"{self.remote}:{self.path}/{new}",
+                ]
+            )
 
     def delete_dir(self, name: str) -> None:
         """Delete a subdirectory at this location."""
         if self.scheme == "file":
             import shutil
+
             target = Path(self.path) / name
             if target.exists():
                 shutil.rmtree(target)
         else:
-            self._rclone_run([
-                "purge",
-                f"{self.remote}:{self.path}/{name}",
-            ])
+            self._rclone_run(
+                [
+                    "purge",
+                    f"{self.remote}:{self.path}/{name}",
+                ]
+            )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _rclone_lsjson(self) -> list[dict]:
-        result = self._rclone_run([
-            "lsjson",
-            f"{self.remote}:{self.path}",
-            "--recursive",
-        ])
-        return json.loads(result.stdout or "[]")
+    def _rclone_lsjson(self) -> list[dict[str, Any]]:
+        result = self._rclone_run(
+            [
+                "lsjson",
+                f"{self.remote}:{self.path}",
+                "--recursive",
+            ]
+        )
+        data: list[dict[str, Any]] = json.loads(result.stdout or "[]")
+        return data
 
     @staticmethod
-    def _rclone_run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    def _rclone_run(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["rclone"] + args,
             capture_output=True,

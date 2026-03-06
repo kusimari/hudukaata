@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from indexer.models.base import CaptionModel
 from indexer.scanner import MediaFile
@@ -20,9 +21,9 @@ class Blip2CaptionModel(CaptionModel):
         self.image_checkpoint = image_checkpoint
         self.whisper_model = whisper_model
         self._device = device
-        self._processor = None
-        self._model = None
-        self._whisper = None
+        self._processor: Any = None
+        self._model: Any = None
+        self._whisper: Any = None
 
     # ------------------------------------------------------------------
     # Lazy loaders
@@ -33,14 +34,16 @@ class Blip2CaptionModel(CaptionModel):
             return self._device
         try:
             import torch
+
             return "cuda" if torch.cuda.is_available() else "cpu"
         except ImportError:
             return "cpu"
 
-    def _load_blip2(self):
+    def _load_blip2(self) -> None:
         if self._processor is None:
-            from transformers import Blip2ForConditionalGeneration, Blip2Processor
             import torch
+            from transformers import Blip2ForConditionalGeneration, Blip2Processor
+
             device = self._get_device()
             self._processor = Blip2Processor.from_pretrained(self.image_checkpoint)
             self._model = Blip2ForConditionalGeneration.from_pretrained(
@@ -48,9 +51,10 @@ class Blip2CaptionModel(CaptionModel):
                 torch_dtype=torch.float16 if device == "cuda" else torch.float32,
             ).to(device)
 
-    def _load_whisper(self):
+    def _load_whisper(self) -> None:
         if self._whisper is None:
             import whisper
+
             self._whisper = whisper.load_model(self.whisper_model)
 
     # ------------------------------------------------------------------
@@ -83,9 +87,8 @@ class Blip2CaptionModel(CaptionModel):
             torch.float16 if device == "cuda" else torch.float32,
         )
         generated_ids = self._model.generate(**inputs, max_new_tokens=50)
-        return self._processor.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )[0].strip()
+        decoded: str = self._processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        return decoded.strip()
 
     def _extract_middle_frame(self, path: Path) -> Path:
         """Extract the middle keyframe of a video to a temp JPEG and return its path."""
@@ -93,10 +96,14 @@ class Blip2CaptionModel(CaptionModel):
         # Get duration via ffprobe
         try:
             import json as _json
+
             proc = subprocess.run(
                 [
-                    "ffprobe", "-v", "quiet",
-                    "-print_format", "json",
+                    "ffprobe",
+                    "-v",
+                    "quiet",
+                    "-print_format",
+                    "json",
                     "-show_format",
                     str(path),
                 ],
@@ -111,10 +118,15 @@ class Blip2CaptionModel(CaptionModel):
         midpoint = duration / 2
         subprocess.run(
             [
-                "ffmpeg", "-ss", str(midpoint),
-                "-i", str(path),
-                "-vframes", "1",
-                "-q:v", "2",
+                "ffmpeg",
+                "-ss",
+                str(midpoint),
+                "-i",
+                str(path),
+                "-vframes",
+                "1",
+                "-q:v",
+                "2",
                 str(tmp),
                 "-y",
             ],
@@ -125,5 +137,6 @@ class Blip2CaptionModel(CaptionModel):
 
     def _transcribe_audio(self, path: Path) -> str:
         self._load_whisper()
-        result = self._whisper.transcribe(str(path))
-        return result.get("text", "").strip()
+        result: dict[str, Any] = self._whisper.transcribe(str(path))
+        text: str = result.get("text", "").strip()
+        return text

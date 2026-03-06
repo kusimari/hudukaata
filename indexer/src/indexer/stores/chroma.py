@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from indexer.stores.base import VectorStore
 
@@ -14,8 +15,8 @@ _META_FILE = "db_meta.json"
 class ChromaVectorStore(VectorStore):
     def __init__(self, collection_name: str = "media") -> None:
         self.collection_name = collection_name
-        self._client = None
-        self._collection = None
+        self._client: Any = None
+        self._collection: Any = None
 
     # ------------------------------------------------------------------
     # VectorStore interface
@@ -68,7 +69,7 @@ class ChromaVectorStore(VectorStore):
         self._client.persist()
 
         # Write sidecar metadata
-        meta = {"created_at": datetime.now(timezone.utc).isoformat()}
+        meta = {"created_at": datetime.now(UTC).isoformat()}
         (local_path / _META_FILE).write_text(json.dumps(meta))
 
     def created_at(self, local_path: Path) -> datetime | None:

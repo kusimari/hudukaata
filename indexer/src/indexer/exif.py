@@ -27,12 +27,14 @@ def extract_exif(mf: MediaFile) -> dict[str, str]:
 # Image — Pillow + exifread
 # ---------------------------------------------------------------------------
 
+
 def _extract_image(path: Path) -> dict[str, str]:
     result: dict[str, str] = {}
 
     # exifread for rich EXIF tags
     try:
         import exifread
+
         with open(path, "rb") as fh:
             tags = exifread.process_file(fh, details=False)
         for key, val in tags.items():
@@ -51,7 +53,7 @@ def _extract_image(path: Path) -> dict[str, str]:
         result["height"] = str(img.height)
         result["format"] = img.format or ""
 
-        raw_exif = img._getexif()  # type: ignore[attr-defined]
+        raw_exif = img._getexif()
         if raw_exif:
             for tag_id, value in raw_exif.items():
                 tag_name = TAGS.get(tag_id, str(tag_id))
@@ -68,14 +70,17 @@ def _extract_image(path: Path) -> dict[str, str]:
 # Video — ffprobe
 # ---------------------------------------------------------------------------
 
+
 def _extract_video(path: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     try:
         proc = subprocess.run(
             [
                 "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 "-show_streams",
                 str(path),
@@ -111,6 +116,7 @@ def _extract_video(path: Path) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Audio — mutagen
 # ---------------------------------------------------------------------------
+
 
 def _extract_audio(path: Path) -> dict[str, str]:
     result: dict[str, str] = {}

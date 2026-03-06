@@ -2,23 +2,44 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Literal
 
 from indexer.pointer import MediaPointer
 
 IMAGE_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
-    ".webp", ".tiff", ".heic", ".heif", ".avif",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".tiff",
+    ".heic",
+    ".heif",
+    ".avif",
 }
 VIDEO_EXTENSIONS = {
-    ".mp4", ".mkv", ".mov", ".avi", ".wmv",
-    ".flv", ".webm", ".m4v",
+    ".mp4",
+    ".mkv",
+    ".mov",
+    ".avi",
+    ".wmv",
+    ".flv",
+    ".webm",
+    ".m4v",
 }
 AUDIO_EXTENSIONS = {
-    ".mp3", ".flac", ".wav", ".aac", ".ogg",
-    ".m4a", ".opus", ".wma",
+    ".mp3",
+    ".flac",
+    ".wav",
+    ".aac",
+    ".ogg",
+    ".m4a",
+    ".opus",
+    ".wma",
 }
 
 _EXT_TO_TYPE: dict[str, str] = {
