@@ -125,9 +125,9 @@ def _extract_video(path: Path) -> dict[str, str]:
 def _extract_audio(path: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     try:
-        from mutagen import File as MutagenFile
+        import mutagen
 
-        audio = MutagenFile(path)
+        audio = mutagen.File(path)
         if audio is None:
             return result
 

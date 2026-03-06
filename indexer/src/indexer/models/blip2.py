@@ -59,7 +59,7 @@ class Blip2CaptionModel(CaptionModel):
             mdl = Blip2ForConditionalGeneration.from_pretrained(
                 self.image_checkpoint,
                 torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            ).to(device)
+            ).to(torch.device(device))
             self._processor, self._model = proc, mdl
 
     def _load_whisper(self) -> None:
