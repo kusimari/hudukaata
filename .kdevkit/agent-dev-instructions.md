@@ -82,14 +82,23 @@ Tests require zero failures.
 
 ### Step 2 — Test gate
 
-1. Run tests:
+1. Read the retry limit from `.kdevkit/project.md` (`max_test_fix_attempts` field).
+   Default: **2**.
+
+2. Run tests:
    ```bash
    cd indexer && python -m pytest tests/ -v
    ```
 
-2. **Zero failures required.** Fix all failures; re-run until the suite is fully green.
+3. **Zero failures required.** For each failure, attempt a fix and re-run.
+   Count each fix-and-rerun cycle against `max_test_fix_attempts`.
 
-3. If the fix requires non-trivial code changes (more than a one-liner), re-run the
+4. **Decision:**
+   - Suite green → proceed to push gate.
+   - Still failing after `max_test_fix_attempts` cycles → **stop**. Do NOT push.
+     Report the remaining failures clearly so the human reviewer can decide.
+
+5. If the fix requires non-trivial code changes (more than a one-liner), re-run the
    quality gate (Step 1) once before pushing.
 
 ---
