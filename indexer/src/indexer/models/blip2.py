@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import os
 import subprocess
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from indexer.models.base import CaptionModel
-from indexer.scanner import MediaFile
+from indexer.pointer import MediaFile
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +77,14 @@ class Blip2CaptionModel(CaptionModel):
         if mf.media_type == "image":
             return self._caption_image(mf.local_path)
         if mf.media_type == "video":
-            tmp = self._extract_middle_frame(mf.local_path)
+            frame_paths: list[Path] = []
             try:
-                return self._caption_image(tmp)
+                frame_paths = self._extract_frames(mf.local_path)
+                captions = [self._caption_image(p) for p in frame_paths]
+                return " | ".join(c for c in captions if c)
             finally:
-                tmp.unlink(missing_ok=True)
+                for p in frame_paths:
+                    p.unlink(missing_ok=True)
         if mf.media_type == "audio":
             return self._transcribe_audio(mf.local_path)
         return ""
@@ -104,59 +108,59 @@ class Blip2CaptionModel(CaptionModel):
         decoded: str = self._processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
         return decoded.strip()
 
-    def _extract_middle_frame(self, path: Path) -> Path:
-        """Extract the middle keyframe of a video to a temp JPEG and return its path."""
-        fd, tmp_str = tempfile.mkstemp(suffix=".jpg", prefix="indexer_frame_")
-        # Close the fd immediately; ffmpeg will write to the path.
-        os.close(fd)
-        tmp = Path(tmp_str)
-
+    def _extract_frames(self, path: Path) -> list[Path]:
+        """Extract frames at 0%, 25%, 50%, 75% of video duration."""
         try:
-            # Get duration via ffprobe
-            try:
-                import json as _json
-
-                proc = subprocess.run(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "quiet",
-                        "-print_format",
-                        "json",
-                        "-show_format",
-                        str(path),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                duration = float(_json.loads(proc.stdout)["format"].get("duration", 0))
-            except Exception as exc:
-                logger.warning("ffprobe failed for %s: %s; seeking to start of file", path, exc)
-                duration = 0.0
-
-            midpoint = duration / 2
-            subprocess.run(
+            proc = subprocess.run(
                 [
-                    "ffmpeg",
-                    "-ss",
-                    str(midpoint),
-                    "-i",
+                    "ffprobe",
+                    "-v",
+                    "quiet",
+                    "-print_format",
+                    "json",
+                    "-show_format",
                     str(path),
-                    "-vframes",
-                    "1",
-                    "-q:v",
-                    "2",
-                    str(tmp),
-                    "-y",
                 ],
                 capture_output=True,
+                text=True,
                 check=True,
             )
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
-        return tmp
+            duration = float(_json.loads(proc.stdout)["format"].get("duration", 0))
+        except Exception as exc:
+            logger.warning("ffprobe failed for %s: %s; extracting from start only", path, exc)
+            duration = 0.0
+
+        offsets = [0.0, duration * 0.25, duration * 0.5, duration * 0.75]
+        frame_paths: list[Path] = []
+        for i, offset in enumerate(offsets):
+            fd, tmp_str = tempfile.mkstemp(suffix=".jpg", prefix=f"indexer_frame{i}_")
+            os.close(fd)
+            tmp = Path(tmp_str)
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-ss",
+                        str(offset),
+                        "-i",
+                        str(path),
+                        "-vframes",
+                        "1",
+                        "-q:v",
+                        "2",
+                        str(tmp),
+                        "-y",
+                    ],
+                    capture_output=True,
+                    check=True,
+                )
+                frame_paths.append(tmp)
+            except Exception as exc:
+                tmp.unlink(missing_ok=True)
+                logger.warning(
+                    "Failed to extract frame at offset %.2f from %s: %s", offset, path, exc
+                )
+        return frame_paths
 
     def _transcribe_audio(self, path: Path) -> str:
         self._load_whisper()

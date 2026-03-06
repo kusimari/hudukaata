@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import logging
-import shutil
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tqdm import tqdm
 
 from indexer.exif import extract_exif
 from indexer.models.base import CaptionModel
-from indexer.pointer import MediaPointer
-from indexer.scanner import scan
+from indexer.pointer import MediaPointer, StorePointer
 from indexer.stores.base import VectorStore
 from indexer.swap import cleanup_stale_tmp, commit, prepare_temp_dir
 from indexer.vectorizers.base import Vectorizer
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def run(
     media: MediaPointer,
-    store: MediaPointer,
+    store: StorePointer,
     caption_model: CaptionModel,
     vectorizer: Vectorizer,
     vector_store: VectorStore,
@@ -32,16 +31,13 @@ def run(
     """Index all media files and write them to the vector store."""
     cleanup_stale_tmp(store)
 
-    local_tmp = Path(tempfile.mkdtemp(prefix="indexer_run_"))
-    try:
-        _run(media, store, caption_model, vectorizer, vector_store, local_tmp)
-    finally:
-        shutil.rmtree(local_tmp, ignore_errors=True)
+    with tempfile.TemporaryDirectory(prefix="indexer_run_") as tmp_str:
+        _run(media, store, caption_model, vectorizer, vector_store, Path(tmp_str))
 
 
 def _run(
     media: MediaPointer,
-    store: MediaPointer,
+    store: StorePointer,
     caption_model: CaptionModel,
     vectorizer: Vectorizer,
     vector_store: VectorStore,
@@ -50,15 +46,8 @@ def _run(
     existing_created_at: datetime | None = None
 
     if store.has_dir("db"):
-        # For rclone pointers, get_dir downloads the DB to a temp dir that
-        # the caller must clean up. We read created_at only; the DB itself
-        # is always rebuilt from scratch (no incremental indexing).
-        _existing_db_path = store.get_dir("db")
-        try:
-            existing_created_at = vector_store.created_at(_existing_db_path)
-        finally:
-            if store.scheme == "rclone":
-                shutil.rmtree(_existing_db_path, ignore_errors=True)
+        with store.get_dir_ctx("db") as existing_db_path:
+            existing_created_at = vector_store.created_at(existing_db_path)
         logger.info(
             "Existing DB found (created at %s); rebuilding from scratch.", existing_created_at
         )
@@ -67,10 +56,8 @@ def _run(
 
     prepare_temp_dir(store, local_tmp)
 
-    media_files = list(scan(media))
-    logger.info("Found %d media files to index.", len(media_files))
-
-    for mf in tqdm(media_files, desc="Indexing", unit="file"):
+    logger.info("Starting indexing run from %s.", media.uri)
+    for mf in tqdm(media.scan(), desc="Indexing", unit="file"):
         logger.debug("Processing %s", mf.relative_path)
         try:
             caption = caption_model.caption(mf)
@@ -80,12 +67,22 @@ def _run(
         except Exception as exc:
             logger.warning("Skipping %s: %s", mf.relative_path, exc)
             continue
-        metadata: dict[str, str] = {"caption": caption, **exif}
+        metadata: dict[str, str] = {
+            "caption": caption,
+            "relative_path": mf.relative_path,
+            **exif,
+        }
         vector_store.add(mf.relative_path, vector, metadata)
 
     db_new_path = local_tmp / "db_new"
     vector_store.save(db_new_path)
     logger.info("Saved new DB to %s", db_new_path)
+
+    index_meta = {
+        "indexed_at": datetime.now(UTC).isoformat(),
+        "source": media.uri,
+    }
+    (db_new_path / "index_meta.json").write_text(json.dumps(index_meta, indent=2))
 
     store.put_dir(db_new_path, dest_name="db_new")
     commit(store, local_tmp, existing_created_at)

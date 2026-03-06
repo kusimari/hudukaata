@@ -7,7 +7,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from indexer.scanner import MediaFile
+from indexer.pointer import MediaFile
 
 logger = logging.getLogger(__name__)
 

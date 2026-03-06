@@ -21,20 +21,20 @@ import contextlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from indexer.pointer import MediaPointer
+from indexer.pointer import StorePointer
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def prepare_temp_dir(store: MediaPointer, local_tmp: Path) -> None:
+def prepare_temp_dir(store: StorePointer, local_tmp: Path) -> None:
     """Ensure local_tmp exists and is empty, ready for writing db_new."""
     local_tmp.mkdir(parents=True, exist_ok=True)
 
 
 def commit(
-    store: MediaPointer,
+    store: StorePointer,
     local_tmp: Path,
     created_at: datetime | None,
 ) -> None:
@@ -66,7 +66,7 @@ def commit(
         raise
 
 
-def cleanup_stale_tmp(store: MediaPointer) -> None:
+def cleanup_stale_tmp(store: StorePointer) -> None:
     """Remove any leftover db_new from a previous aborted run."""
     if store.has_dir("db_new"):
         store.delete_dir("db_new")

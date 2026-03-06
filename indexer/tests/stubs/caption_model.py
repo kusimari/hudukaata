@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from indexer.models.base import CaptionModel
-from indexer.scanner import MediaFile
+from indexer.pointer import MediaFile
 
 
 class StubCaptionModel(CaptionModel):

@@ -1,120 +1,83 @@
-"""Tests for ChromaVectorStore — chromadb is mocked throughout."""
+"""Tests for ChromaVectorStore — uses real chromadb (no mocking)."""
 
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from indexer.stores.chroma import _META_FILE
-
-
-@pytest.fixture()
-def mock_chromadb():
-    """Patch chromadb via sys.modules so the lazy `import chromadb` inside
-    load() / create_empty() picks up our mock, not the real library."""
-    mock_client = MagicMock()
-    mock_collection = MagicMock()
-    mock_client.create_collection.return_value = mock_collection
-    mock_client.get_or_create_collection.return_value = mock_collection
-
-    mock_chroma = MagicMock()
-    mock_chroma.PersistentClient.return_value = mock_client
-
-    mock_settings_cls = MagicMock(return_value=MagicMock())
-    mock_config = MagicMock()
-    mock_config.Settings = mock_settings_cls
-
-    with patch.dict(
-        "sys.modules",
-        {
-            "chromadb": mock_chroma,
-            "chromadb.config": mock_config,
-        },
-    ):
-        yield mock_chroma, mock_client, mock_collection
+from indexer.stores.chroma import _META_FILE, ChromaVectorStore
 
 
 class TestCreateEmptyAndAdd:
-    def test_create_empty_initialises_collection(self, mock_chromadb):
-        from indexer.stores.chroma import ChromaVectorStore
-
-        mock_chroma_mod, mock_client, _ = mock_chromadb
+    def test_create_empty_allows_adding(self, tmp_path):
         store = ChromaVectorStore()
         store.create_empty()
-
-        mock_chroma_mod.PersistentClient.assert_called_once()
-        mock_client.create_collection.assert_called_once_with("media")
-
-    def test_add_delegates_to_collection(self, mock_chromadb):
-        from indexer.stores.chroma import ChromaVectorStore
-
-        _, _, mock_collection = mock_chromadb
-        store = ChromaVectorStore()
-        store.create_empty()
-
-        store.add("id1", [0.1, 0.2], {"caption": "cat"})
-
-        mock_collection.add.assert_called_once_with(
-            ids=["id1"],
-            embeddings=[[0.1, 0.2]],
-            metadatas=[{"caption": "cat"}],
-        )
+        # Should not raise
+        store.add("id1", [0.1, 0.2, 0.3], {"caption": "a cat"})
 
     def test_add_raises_if_not_initialised(self):
-        from indexer.stores.chroma import ChromaVectorStore
-
         store = ChromaVectorStore()
         with pytest.raises(RuntimeError, match="not initialised"):
             store.add("x", [1.0], {})
 
-
-class TestSave:
-    def test_save_moves_tmp_dir_and_writes_metadata(self, mock_chromadb, tmp_path):
-        from indexer.stores.chroma import ChromaVectorStore
-
+    def test_multiple_adds(self, tmp_path):
         store = ChromaVectorStore()
         store.create_empty()
+        store.add("doc1", [0.1] * 8, {"caption": "first"})
+        store.add("doc2", [0.2] * 8, {"caption": "second"})
+        # If no exception, both were accepted
+        dest = tmp_path / "db"
+        store.save(dest)
+        assert dest.is_dir()
 
-        # Simulate that create_empty created _tmp_dir on disk
-        assert store._tmp_dir is not None
-        store._tmp_dir.mkdir(parents=True, exist_ok=True)
+
+class TestSave:
+    def test_save_creates_directory_and_metadata(self, tmp_path):
+        store = ChromaVectorStore()
+        store.create_empty()
+        store.add("id1", [0.5] * 4, {"caption": "test"})
 
         dest = tmp_path / "db_new"
         store.save(dest)
 
         assert dest.is_dir()
-        assert store._tmp_dir is None  # cleared after move
+        assert (dest / _META_FILE).exists()
         meta = json.loads((dest / _META_FILE).read_text())
         assert "created_at" in meta
 
     def test_save_raises_if_not_initialised(self):
-        from indexer.stores.chroma import ChromaVectorStore
-
         store = ChromaVectorStore()
         with pytest.raises(RuntimeError, match="not initialised"):
             store.save(Path("/tmp/nowhere"))
 
+    def test_save_tmp_dir_cleared(self, tmp_path):
+        store = ChromaVectorStore()
+        store.create_empty()
+        store.save(tmp_path / "db")
+        assert store._tmp_dir is None
+
 
 class TestLoad:
-    def test_load_opens_persistent_client(self, mock_chromadb, tmp_path):
-        from indexer.stores.chroma import ChromaVectorStore
-
-        mock_chroma_mod, mock_client, _ = mock_chromadb
+    def test_load_opens_existing_collection(self, tmp_path):
+        # Create + save
         store = ChromaVectorStore()
-        store.load(tmp_path / "db")
+        store.create_empty()
+        store.add("x", [1.0, 2.0], {"caption": "hi"})
+        dest = tmp_path / "db"
+        store.save(dest)
 
-        mock_chroma_mod.PersistentClient.assert_called_once()
-        mock_client.get_or_create_collection.assert_called_once_with("media")
+        # Load into a fresh instance
+        store2 = ChromaVectorStore()
+        store2.load(dest)
+        # Should not raise — collection exists
+        store2.add("y", [3.0, 4.0], {"caption": "there"})
 
 
 class TestCreatedAt:
     def test_returns_datetime_from_sidecar(self, tmp_path):
-        from indexer.stores.chroma import ChromaVectorStore
-
         db_dir = tmp_path / "db"
         db_dir.mkdir()
         ts = "2024-06-15T12:00:00+00:00"
@@ -126,17 +89,22 @@ class TestCreatedAt:
         assert result == datetime.fromisoformat(ts)
 
     def test_returns_none_when_no_sidecar(self, tmp_path):
-        from indexer.stores.chroma import ChromaVectorStore
-
         store = ChromaVectorStore()
         assert store.created_at(tmp_path / "missing") is None
 
     def test_returns_none_on_corrupt_sidecar(self, tmp_path):
-        from indexer.stores.chroma import ChromaVectorStore
-
         db_dir = tmp_path / "db"
         db_dir.mkdir()
         (db_dir / _META_FILE).write_text("not json")
 
         store = ChromaVectorStore()
         assert store.created_at(db_dir) is None
+
+    def test_roundtrip_created_at_after_save(self, tmp_path):
+        store = ChromaVectorStore()
+        store.create_empty()
+        dest = tmp_path / "db"
+        store.save(dest)
+
+        result = store.created_at(dest)
+        assert isinstance(result, datetime)

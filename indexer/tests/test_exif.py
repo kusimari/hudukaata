@@ -8,7 +8,7 @@ from typing import Literal
 import pytest
 
 from indexer.exif import extract_exif
-from indexer.scanner import MediaFile
+from indexer.pointer import MediaFile
 
 
 @pytest.fixture()

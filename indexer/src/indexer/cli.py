@@ -10,7 +10,7 @@ import click
 
 from indexer.models.base import CaptionModel
 from indexer.models.blip2 import Blip2CaptionModel
-from indexer.pointer import MediaPointer
+from indexer.pointer import MediaPointer, StorePointer
 from indexer.runner import run
 from indexer.stores.base import VectorStore
 from indexer.stores.chroma import ChromaVectorStore
@@ -90,10 +90,14 @@ def index(
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
 
     media_ptr = MediaPointer.parse(media)
-    store_ptr = MediaPointer.parse(store)
+    store_ptr = StorePointer.parse(store)
 
     caption_model = _resolve_class(caption_model_name, _CAPTION_MODELS, "caption-model")
     vectorizer = _resolve_class(vectorizer_name, _VECTORIZERS, "vectorizer")
     vector_store = _resolve_class(vector_store_name, _VECTOR_STORES, "vector-store")
 
     run(media_ptr, store_ptr, caption_model, vectorizer, vector_store)
+
+
+if __name__ == "__main__":
+    main()

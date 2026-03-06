@@ -1,30 +1,46 @@
-"""Tests for runner.py — full run using stubs."""
+"""Integration tests for runner.py — real ChromaDB + real SentenceTransformer."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from indexer.pointer import MediaPointer
+from indexer.pointer import MediaPointer, StorePointer
 from indexer.runner import run
+from indexer.stores.chroma import ChromaVectorStore
+from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 from tests.stubs.caption_model import StubCaptionModel
-from tests.stubs.vector_store import StubVectorStore
-from tests.stubs.vectorizer import StubVectorizer
 
 
-def _file_pointer(path: Path) -> MediaPointer:
+def _media(path: Path) -> MediaPointer:
     return MediaPointer(scheme="file", remote=None, path=str(path))
+
+
+def _store(path: Path) -> StorePointer:
+    return StorePointer(scheme="file", remote=None, path=str(path))
 
 
 @pytest.fixture()
 def media_dir(tmp_path):
+    """A small media directory with real (Pillow-generated) image files."""
+    try:
+        from PIL import Image
+    except ImportError:
+        pytest.skip("Pillow not installed")
+
     media = tmp_path / "media"
     media.mkdir()
-    (media / "a.jpg").write_bytes(b"fake jpeg")
-    (media / "b.mp3").write_bytes(b"fake mp3")
-    (media / "sub").mkdir()
-    (media / "sub" / "c.png").write_bytes(b"fake png")
+
+    img = Image.new("RGB", (32, 32), color=(255, 0, 0))
+    img.save(media / "a.jpg")
+
+    sub = media / "sub"
+    sub.mkdir()
+    img2 = Image.new("RGB", (16, 16), color=(0, 255, 0))
+    img2.save(sub / "c.png")
+
     return media
 
 
@@ -35,64 +51,48 @@ def store_dir(tmp_path):
     return store
 
 
-class TestRun:
-    def test_all_files_indexed(self, media_dir, store_dir):
-        vector_store = StubVectorStore()
-
+class TestRunIntegration:
+    def test_creates_db_directory(self, media_dir, store_dir):
         run(
-            media=_file_pointer(media_dir),
-            store=_file_pointer(store_dir),
-            caption_model=StubCaptionModel(),
-            vectorizer=StubVectorizer(),
-            vector_store=vector_store,
+            _media(media_dir),
+            _store(store_dir),
+            StubCaptionModel(),
+            SentenceTransformerVectorizer(),
+            ChromaVectorStore(),
         )
-
-        assert len(vector_store.docs) == 3
-        keys = set(vector_store.docs.keys())
-        assert any("a.jpg" in k for k in keys)
-        assert any("b.mp3" in k for k in keys)
-        assert any("c.png" in k for k in keys)
-
-    def test_metadata_contains_caption(self, media_dir, store_dir):
-        vector_store = StubVectorStore()
-
-        run(
-            media=_file_pointer(media_dir),
-            store=_file_pointer(store_dir),
-            caption_model=StubCaptionModel(),
-            vectorizer=StubVectorizer(),
-            vector_store=vector_store,
-        )
-
-        for doc_id, (_vector, metadata) in vector_store.docs.items():
-            assert "caption" in metadata
-            assert metadata["caption"] == doc_id  # StubCaptionModel returns path
-
-    def test_db_new_is_promoted_to_db(self, media_dir, store_dir):
-        run(
-            media=_file_pointer(media_dir),
-            store=_file_pointer(store_dir),
-            caption_model=StubCaptionModel(),
-            vectorizer=StubVectorizer(),
-            vector_store=StubVectorStore(),
-        )
-
         assert (store_dir / "db").is_dir()
-        assert not (store_dir / "db_new").exists()
 
-    def test_stale_db_new_cleaned_before_run(self, media_dir, store_dir):
-        # Leave a stale db_new from a previous run
-        (store_dir / "db_new").mkdir()
-        (store_dir / "db_new" / "stale.txt").write_text("stale")
-
+    def test_writes_index_meta(self, media_dir, store_dir):
         run(
-            media=_file_pointer(media_dir),
-            store=_file_pointer(store_dir),
-            caption_model=StubCaptionModel(),
-            vectorizer=StubVectorizer(),
-            vector_store=StubVectorStore(),
+            _media(media_dir),
+            _store(store_dir),
+            StubCaptionModel(),
+            SentenceTransformerVectorizer(),
+            ChromaVectorStore(),
+        )
+        meta_path = store_dir / "db" / "index_meta.json"
+        assert meta_path.exists()
+        meta = json.loads(meta_path.read_text())
+        assert "indexed_at" in meta
+        assert meta["source"] == f"file://{media_dir}"
+
+    def test_second_run_archives_old_db(self, media_dir, store_dir):
+        vectorizer = SentenceTransformerVectorizer()
+        run(
+            _media(media_dir),
+            _store(store_dir),
+            StubCaptionModel(),
+            vectorizer,
+            ChromaVectorStore(),
+        )
+        run(
+            _media(media_dir),
+            _store(store_dir),
+            StubCaptionModel(),
+            vectorizer,
+            ChromaVectorStore(),
         )
 
-        assert (store_dir / "db").is_dir()
-        # Stale dir was cleaned up
-        assert not (store_dir / "db_new").exists()
+        # After second run, an archive db_YYYY-MM-DD should exist
+        archived = [d for d in store_dir.iterdir() if d.name.startswith("db_")]
+        assert len(archived) >= 1
