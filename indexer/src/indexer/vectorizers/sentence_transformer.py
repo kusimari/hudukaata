@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from indexer.text import format_text as format_text  # re-exported for callers
 from indexer.vectorizers.base import Vectorizer
 
 
@@ -28,12 +29,3 @@ class SentenceTransformerVectorizer(Vectorizer):
         self._load()
         dim: int = int(self._model.get_sentence_embedding_dimension())
         return dim
-
-
-def format_text(caption: str, exif: dict[str, str]) -> str:
-    """Build the combined text fed to the vectorizer."""
-    lines = [caption]
-    if exif:
-        lines += ["", "EXIF:"]
-        lines.extend(f"{k}: {v}" for k, v in sorted(exif.items()))
-    return "\n".join(lines)

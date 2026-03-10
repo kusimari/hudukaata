@@ -233,6 +233,10 @@ class _BasePointer:
                     f" or dots (got {remote!r})"
                 )
             path_part = rest[colon_pos + 1 :]
+            # rclone remote paths are always relative to the remote root, so we
+            # strip all leading slashes to produce a canonical form.  The uri
+            # property always rebuilds as rclone:remote:///path, so the round-
+            # trip is stable regardless of how many slashes the caller supplied.
             path = path_part.lstrip("/")
             return cls(scheme="rclone", remote=remote, path=path)
 
@@ -246,7 +250,10 @@ class _BasePointer:
         return f"rclone:{self.remote}:///{self.path}"
 
     def _rclone_lsjson(self) -> list[dict[str, Any]]:
-        assert self.scheme == "rclone", "_rclone_lsjson() called on non-rclone pointer"
+        if self.scheme != "rclone":
+            raise RuntimeError(
+                f"_rclone_lsjson() called on non-rclone pointer (scheme={self.scheme!r})"
+            )
         result = self._rclone_run(["lsjson", f"{self.remote}:{self.path}", "--recursive"])
         data: list[dict[str, Any]] = json.loads(result.stdout or "[]")
         return data

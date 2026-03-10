@@ -14,6 +14,16 @@ from indexer.vectorizers.sentence_transformer import SentenceTransformerVectoriz
 from tests.stubs.caption_model import StubCaptionModel
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _require_vectorizer_model() -> None:
+    """Skip the whole module when the sentence-transformer model cannot be loaded."""
+    v = SentenceTransformerVectorizer()
+    try:
+        v.vectorize("warmup")
+    except Exception as exc:
+        pytest.skip(f"sentence-transformers model unavailable: {exc}")
+
+
 def _media(path: Path) -> MediaPointer:
     return MediaPointer(scheme="file", remote=None, path=str(path))
 

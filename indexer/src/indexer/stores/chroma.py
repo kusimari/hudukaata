@@ -73,11 +73,22 @@ class ChromaVectorStore(VectorStore):
     def save(self, local_path: Path) -> None:
         if self._client is None or self._tmp_dir is None:
             raise RuntimeError("Store not initialised; call create_empty() before save()")
+        # Release client/collection handles before moving the directory.
+        # ChromaDB's PersistentClient may hold open file handles; closing them
+        # first avoids failures on Windows and certain Linux configurations.
+        self._client = None
+        self._collection = None
         # PersistentClient auto-persists on write; just move the directory.
-        if local_path.exists():
-            shutil.rmtree(local_path)
-        shutil.move(str(self._tmp_dir), str(local_path))
+        # Clean up the temp dir on failure so it is never orphaned under /tmp.
+        tmp_dir = self._tmp_dir
         self._tmp_dir = None
+        try:
+            if local_path.exists():
+                shutil.rmtree(local_path)
+            shutil.move(str(tmp_dir), str(local_path))
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
 
         # Write sidecar metadata
         meta = {"created_at": datetime.now(UTC).isoformat()}

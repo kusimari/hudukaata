@@ -15,8 +15,8 @@ from indexer.models.base import CaptionModel
 from indexer.pointer import MediaPointer, StorePointer
 from indexer.stores.base import VectorStore
 from indexer.swap import cleanup_stale_tmp, commit, prepare_temp_dir
+from indexer.text import format_text
 from indexer.vectorizers.base import Vectorizer
-from indexer.vectorizers.sentence_transformer import format_text
 
 logger = logging.getLogger(__name__)
 
