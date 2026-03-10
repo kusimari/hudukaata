@@ -159,6 +159,7 @@ class TestTranscribeAudio:
         """
         pytest.importorskip("whisper")  # skip if package absent
         import shutil
+
         if shutil.which("ffmpeg") is None:
             pytest.skip("ffmpeg not available")
         model = Blip2CaptionModel(whisper_model="base")
