@@ -158,6 +158,9 @@ class TestTranscribeAudio:
         we only assert that the pipeline runs and returns a string.
         """
         pytest.importorskip("whisper")  # skip if package absent
+        import shutil
+        if shutil.which("ffmpeg") is None:
+            pytest.skip("ffmpeg not available")
         model = Blip2CaptionModel(whisper_model="base")
         # Force the model to load so any download error surfaces as a skip.
         try:
