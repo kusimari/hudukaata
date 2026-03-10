@@ -29,6 +29,17 @@ class StubVectorStore(VectorStore):
     ) -> None:
         self.docs[id] = (vector, metadata)
 
+    def query(
+        self,
+        vector: list[float],
+        n_results: int = 5,
+    ) -> list[dict[str, object]]:
+        # Return up to n_results docs (no actual similarity ranking in stub).
+        results = []
+        for id_, (_vec, meta) in list(self.docs.items())[:n_results]:
+            results.append({"id": id_, **meta})
+        return results
+
     def save(self, local_path: Path) -> None:
         local_path.mkdir(parents=True, exist_ok=True)
 

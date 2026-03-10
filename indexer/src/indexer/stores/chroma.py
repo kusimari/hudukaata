@@ -83,6 +83,24 @@ class ChromaVectorStore(VectorStore):
         meta = {"created_at": datetime.now(UTC).isoformat()}
         (local_path / _META_FILE).write_text(json.dumps(meta))
 
+    def query(
+        self,
+        vector: list[float],
+        n_results: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return up to *n_results* documents closest to *vector*."""
+        if self._collection is None:
+            raise RuntimeError("Store not initialised; call load() or create_empty() first")
+        results = self._collection.query(
+            query_embeddings=[vector],
+            n_results=n_results,
+            include=["metadatas"],
+        )
+        return [
+            {"id": id_, **meta}
+            for id_, meta in zip(results["ids"][0], results["metadatas"][0], strict=True)
+        ]
+
     def created_at(self, local_path: Path) -> datetime | None:
         meta_path = local_path / _META_FILE
         if not meta_path.exists():

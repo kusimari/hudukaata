@@ -59,20 +59,21 @@ def _run(
     logger.info("Starting indexing run from %s.", media.uri)
     for mf in tqdm(media.scan(), desc="Indexing", unit="file"):
         logger.debug("Processing %s", mf.relative_path)
-        try:
-            caption = caption_model.caption(mf)
-            exif = extract_exif(mf)
-            text = format_text(caption, exif)
-            vector = vectorizer.vectorize(text)
-        except Exception as exc:
-            logger.warning("Skipping %s: %s", mf.relative_path, exc)
-            continue
-        metadata: dict[str, str] = {
-            "caption": caption,
-            "relative_path": mf.relative_path,
-            **exif,
-        }
-        vector_store.add(mf.relative_path, vector, metadata)
+        with mf:
+            try:
+                caption = caption_model.caption(mf)
+                exif = extract_exif(mf)
+                text = format_text(caption, exif)
+                vector = vectorizer.vectorize(text)
+            except Exception as exc:
+                logger.warning("Skipping %s: %s", mf.relative_path, exc)
+                continue
+            metadata: dict[str, str] = {
+                "caption": caption,
+                "relative_path": mf.relative_path,
+                **exif,
+            }
+            vector_store.add(mf.relative_path, vector, metadata)
 
     db_new_path = local_tmp / "db_new"
     vector_store.save(db_new_path)

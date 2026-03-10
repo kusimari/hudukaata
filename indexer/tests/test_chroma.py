@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from indexer.stores.chroma import _META_FILE, ChromaVectorStore
+from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 
 
 class TestCreateEmptyAndAdd:
@@ -28,7 +29,6 @@ class TestCreateEmptyAndAdd:
         store.create_empty()
         store.add("doc1", [0.1] * 8, {"caption": "first"})
         store.add("doc2", [0.2] * 8, {"caption": "second"})
-        # If no exception, both were accepted
         dest = tmp_path / "db"
         store.save(dest)
         assert dest.is_dir()
@@ -62,14 +62,12 @@ class TestSave:
 
 class TestLoad:
     def test_load_opens_existing_collection(self, tmp_path):
-        # Create + save
         store = ChromaVectorStore()
         store.create_empty()
         store.add("x", [1.0, 2.0], {"caption": "hi"})
         dest = tmp_path / "db"
         store.save(dest)
 
-        # Load into a fresh instance
         store2 = ChromaVectorStore()
         store2.load(dest)
         # Should not raise — collection exists
@@ -108,3 +106,57 @@ class TestCreatedAt:
 
         result = store.created_at(dest)
         assert isinstance(result, datetime)
+
+
+class TestQuery:
+    def test_query_raises_if_not_initialised(self):
+        store = ChromaVectorStore()
+        with pytest.raises(RuntimeError, match="not initialised"):
+            store.query([0.1, 0.2], n_results=3)
+
+    def test_query_returns_list_of_dicts(self, tmp_path):
+        store = ChromaVectorStore()
+        store.create_empty()
+        store.add("img_0.jpg", [1.0, 0.0], {"caption": "a dog"})
+        store.add("img_1.jpg", [0.0, 1.0], {"caption": "a cat"})
+
+        results = store.query([1.0, 0.0], n_results=1)
+        assert len(results) == 1
+        assert "id" in results[0]
+        assert "caption" in results[0]
+
+    def test_semantic_search_finds_relevant_results(self, tmp_path):
+        """Add 100 items via real sentence-transformer vectors and verify semantic
+        search surfaces the thematically-closest documents at the top."""
+        vectorizer = SentenceTransformerVectorizer()
+        try:
+            vectorizer.vectorize("warmup")  # force download / cache load
+        except Exception as exc:
+            pytest.skip(f"sentence-transformers model unavailable: {exc}")
+        store = ChromaVectorStore()
+        store.create_empty()
+
+        # 98 generic captions + 2 topical ones we expect to find
+        captions = [f"A photo of random object number {i}" for i in range(98)]
+        captions.append("A dog playing fetch in the park with a ball")  # idx 98
+        captions.append("A cat sitting on a warm windowsill in the sun")  # idx 99
+
+        for i, caption in enumerate(captions):
+            vec = vectorizer.vectorize(caption)
+            store.add(
+                f"img_{i:03d}.jpg",
+                vec,
+                {"caption": caption, "relative_path": f"img_{i:03d}.jpg"},
+            )
+
+        # Query is semantically close to the dog caption
+        query_vec = vectorizer.vectorize("dog fetching a ball outdoors")
+        results = store.query(query_vec, n_results=5)
+
+        assert len(results) > 0
+        assert all("id" in r and "caption" in r for r in results)
+
+        found_captions = [r["caption"] for r in results]
+        assert any("dog" in c.lower() for c in found_captions), (
+            f"Expected dog-related caption in top-5 results, got: {found_captions}"
+        )

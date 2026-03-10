@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 class VectorStore(ABC):
@@ -26,6 +27,19 @@ class VectorStore(ABC):
         metadata: dict[str, str],
     ) -> None:
         """Add a single document."""
+        ...
+
+    @abstractmethod
+    def query(
+        self,
+        vector: list[float],
+        n_results: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return up to *n_results* documents closest to *vector*.
+
+        Each result is a dict with at least an ``"id"`` key plus all stored
+        metadata fields.
+        """
         ...
 
     @abstractmethod

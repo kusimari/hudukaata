@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from indexer.pointer import MediaPointer, StorePointer
+from indexer.pointer import MediaFile, MediaPointer, StorePointer, _LocalFile
 
 # ---------------------------------------------------------------------------
 # Parsing — shared by both pointer types
@@ -29,6 +29,11 @@ class TestParseMediaPointer:
         assert p.scheme == "rclone"
         assert p.remote == "gdrive"
         assert p.path == "photos"
+
+    def test_rclone_dotted_remote_name(self):
+        # rclone allows dots in remote names (e.g. "my.remote")
+        p = MediaPointer.parse("rclone:my.remote:///path")
+        assert p.remote == "my.remote"
 
     def test_unsupported_scheme_raises(self):
         with pytest.raises(ValueError, match="Unsupported URI scheme"):
@@ -69,38 +74,44 @@ class TestUri:
 
 
 # ---------------------------------------------------------------------------
-# iter_files — file:// (no rclone needed)
+# MediaFile — context manager behaviour
 # ---------------------------------------------------------------------------
 
 
-class TestIterFiles:
-    def test_yields_all_files(self, tmp_path):
-        (tmp_path / "a.jpg").write_bytes(b"x")
-        (tmp_path / "sub").mkdir()
-        (tmp_path / "sub" / "b.png").write_bytes(b"x")
+class TestMediaFile:
+    def test_local_path_raises_outside_context(self, tmp_path):
+        path = tmp_path / "img.jpg"
+        path.write_bytes(b"x")
+        mf = MediaFile("img.jpg", "image", _LocalFile(path))
+        with pytest.raises(RuntimeError, match="with mf"):
+            _ = mf.local_path
 
-        p = MediaPointer.parse(f"file://{tmp_path}")
-        result = []
-        for rel, ctx in p.iter_files():
-            with ctx as local:
-                result.append((rel, local.name))
+    def test_local_path_accessible_inside_context(self, tmp_path):
+        path = tmp_path / "img.jpg"
+        path.write_bytes(b"x")
+        mf = MediaFile("img.jpg", "image", _LocalFile(path))
+        with mf:
+            assert mf.local_path == path
 
-        assert sorted(r[0] for r in result) == ["a.jpg", "sub/b.png"]
+    def test_local_path_invalid_after_context_exits(self, tmp_path):
+        path = tmp_path / "img.jpg"
+        path.write_bytes(b"x")
+        mf = MediaFile("img.jpg", "image", _LocalFile(path))
+        with mf:
+            pass
+        with pytest.raises(RuntimeError):
+            _ = mf.local_path
 
-    def test_context_manager_returns_path(self, tmp_path):
-        (tmp_path / "img.jpg").write_bytes(b"data")
-        p = MediaPointer.parse(f"file://{tmp_path}")
-        for _rel, ctx in p.iter_files():
-            with ctx as local:
-                assert local.exists()
-
-    def test_empty_directory(self, tmp_path):
-        p = MediaPointer.parse(f"file://{tmp_path}")
-        assert list(p.iter_files()) == []
+    def test_enter_returns_self(self, tmp_path):
+        path = tmp_path / "img.jpg"
+        path.write_bytes(b"x")
+        mf = MediaFile("img.jpg", "image", _LocalFile(path))
+        with mf as entered:
+            assert entered is mf
 
 
 # ---------------------------------------------------------------------------
-# scan — filters by recognised extension
+# scan() — filters by recognised extension, yields MediaFile context managers
 # ---------------------------------------------------------------------------
 
 
@@ -138,6 +149,17 @@ class TestScan:
         files = list(p.scan())
         assert any(f.relative_path == "sub/nested.png" for f in files)
 
+    def test_local_path_accessible_inside_with_block(self, tmp_path):
+        (tmp_path / "img.jpg").write_bytes(b"x")
+        p = MediaPointer.parse(f"file://{tmp_path}")
+        for mf in p.scan():
+            with mf:
+                assert mf.local_path.exists()
+
+    def test_empty_directory(self, tmp_path):
+        p = MediaPointer.parse(f"file://{tmp_path}")
+        assert list(p.scan()) == []
+
 
 # ---------------------------------------------------------------------------
 # StorePointer — local filesystem operations
@@ -168,6 +190,13 @@ class TestStorePointer:
 
         local = store.get_dir("uploaded")
         assert (local / "data.txt").read_text() == "hello"
+
+    def test_get_dir_ctx_yields_path(self, tmp_path):
+        (tmp_path / "db").mkdir()
+        (tmp_path / "db" / "data.txt").write_text("ok")
+        store = StorePointer.parse(f"file://{tmp_path}")
+        with store.get_dir_ctx("db") as p:
+            assert (p / "data.txt").read_text() == "ok"
 
     def test_rename_dir(self, tmp_path):
         (tmp_path / "old").mkdir()

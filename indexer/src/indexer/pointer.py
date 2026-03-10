@@ -1,12 +1,19 @@
 """MediaPointer and StorePointer — abstract file:// and rclone: URI schemes.
 
-MediaPointer is for *reading* media files (iter_files, scan).
+MediaPointer is for *reading* media files (scan).
 StorePointer is for *reading and writing* database directories (get_dir, put_dir, etc.).
 Both share common URI parsing and rclone helpers via _BasePointer.
 
-iter_files() yields ``(relative_path, file_ctx)`` pairs where *file_ctx* is a
-context manager: ``with file_ctx as local_path:`` downloads the file (rclone) or
-just returns the existing path (file://), and cleans up the temp dir on exit.
+scan() yields MediaFile objects that are context managers.  Use each one with a
+``with`` block to access the file on disk::
+
+    for mf in media.scan():
+        with mf:
+            process(mf.local_path)  # valid here; cleaned up on exit for rclone
+
+For rclone sources a single shared temporary directory is created per scan() call;
+each file is downloaded into it on context entry and deleted on exit, so large
+remotes never exhaust local disk.
 """
 
 from __future__ import annotations
@@ -18,8 +25,8 @@ import subprocess
 import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
 from pathlib import Path
+from types import TracebackType
 from typing import Any, Literal, Self
 
 # ---------------------------------------------------------------------------
@@ -67,36 +74,71 @@ _EXT_TO_TYPE: dict[str, Literal["image", "video", "audio"]] = {
 
 
 # ---------------------------------------------------------------------------
-# MediaFile
+# MediaFile — context-manager wrapper around a single media file
 # ---------------------------------------------------------------------------
 
 
-@dataclass
 class MediaFile:
-    """A media file ready for captioning and vectorisation.
+    """A media file yielded by :meth:`MediaPointer.scan`.
 
-    ``local_path`` is always a valid, readable file on the local filesystem.
+    Use as a context manager to access the file on disk::
 
-    **Lifetime contract (rclone sources):** when a ``MediaFile`` is produced by
-    :meth:`MediaPointer.scan`, ``local_path`` is backed by a temporary directory
-    that is deleted as soon as the caller's ``for`` loop advances to the next
-    file.  Process ``local_path`` entirely within the current iteration — do not
-    store references that outlive the loop body.  For ``file://`` sources the
-    path is permanent and this restriction does not apply.
+        for mf in media.scan():
+            with mf:
+                caption = model.caption(mf)   # mf.local_path is valid here
+
+    ``local_path`` raises :class:`RuntimeError` if accessed outside the
+    ``with`` block.  For ``file://`` sources the underlying path is permanent;
+    the context entry/exit are no-ops.  For ``rclone:`` sources the file is
+    downloaded on ``__enter__`` and deleted on ``__exit__``.
     """
 
-    relative_path: str
-    local_path: Path
-    media_type: Literal["image", "video", "audio"]
+    def __init__(
+        self,
+        relative_path: str,
+        media_type: Literal["image", "video", "audio"],
+        _ctx: AbstractContextManager[Path],
+    ) -> None:
+        self.relative_path = relative_path
+        self.media_type = media_type
+        self._ctx = _ctx
+        self._local: Path | None = None
+
+    @property
+    def local_path(self) -> Path:
+        """Local filesystem path to the file.  Only valid inside ``with mf:``."""
+        if self._local is None:
+            raise RuntimeError(
+                "local_path is only accessible inside a 'with mf:' block. "
+                "Use: for mf in media.scan(): with mf: ..."
+            )
+        return self._local
+
+    def __enter__(self) -> MediaFile:
+        self._local = self._ctx.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self._ctx.__exit__(exc_type, exc_val, exc_tb)
+        self._local = None
+
+    def __repr__(self) -> str:
+        state = "open" if self._local is not None else "closed"
+        return f"MediaFile({self.relative_path!r}, {self.media_type!r}, {state})"
 
 
 # ---------------------------------------------------------------------------
-# File context managers
+# Internal file-context implementations
 # ---------------------------------------------------------------------------
 
 
 class _LocalFile:
-    """Context manager for local file:// paths — returns the path as-is, no cleanup."""
+    """Context manager for a pre-existing local path — no download, no cleanup."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -105,19 +147,23 @@ class _LocalFile:
         return self._path
 
     def __exit__(self, *args: object) -> None:
-        pass  # local files are not managed by us
+        pass
 
 
 class _RcloneFile:
-    """Context manager that downloads a single remote file on entry and deletes it on exit."""
+    """Context manager that downloads one remote file and deletes it on exit.
 
-    def __init__(self, pointer: _BasePointer, rel: str) -> None:
+    The *tmpdir* is shared across all files in a single scan() call; this class
+    only deletes its own file, never the directory.
+    """
+
+    def __init__(self, pointer: _BasePointer, rel: str, tmpdir: Path) -> None:
         self._pointer = pointer
         self._rel = rel
-        self._tmpdir: Path | None = None
+        self._tmpdir = tmpdir
+        self._local: Path | None = None
 
     def __enter__(self) -> Path:
-        self._tmpdir = Path(tempfile.mkdtemp(prefix="indexer_rclone_"))
         local = self._tmpdir / self._rel
         local.parent.mkdir(parents=True, exist_ok=True)
         self._pointer._rclone_run(
@@ -127,12 +173,13 @@ class _RcloneFile:
                 str(local),
             ]
         )
+        self._local = local
         return local
 
     def __exit__(self, *args: object) -> None:
-        if self._tmpdir is not None:
-            shutil.rmtree(self._tmpdir, ignore_errors=True)
-            self._tmpdir = None
+        if self._local is not None:
+            self._local.unlink(missing_ok=True)
+            self._local = None
 
 
 # ---------------------------------------------------------------------------
@@ -140,15 +187,25 @@ class _RcloneFile:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
 class _BasePointer:
-    scheme: Literal["file", "rclone"]
-    remote: str | None  # rclone remote name; None for file://
-    path: str  # absolute path (on FS or remote)
+    """Common fields and helpers shared by MediaPointer and StorePointer."""
+
+    def __init__(
+        self,
+        scheme: Literal["file", "rclone"],
+        remote: str | None,
+        path: str,
+    ) -> None:
+        self.scheme = scheme
+        self.remote = remote
+        self.path = path
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.uri!r})"
 
     @classmethod
     def parse(cls, uri: str) -> Self:
-        """Parse a URI into a pointer instance.
+        """Parse a URI string into a pointer instance.
 
         Supported formats::
 
@@ -170,10 +227,10 @@ class _BasePointer:
                     f"Invalid rclone URI (missing path separator after remote name): {uri!r}"
                 ) from None
             remote = rest[:colon_pos]
-            if not re.fullmatch(r"[A-Za-z0-9_-]+", remote):
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", remote):
                 raise ValueError(
-                    "rclone remote name must contain only alphanumerics, hyphens, or underscores"
-                    f" (got {remote!r})"
+                    "rclone remote name must contain only alphanumerics, hyphens, underscores,"
+                    f" or dots (got {remote!r})"
                 )
             path_part = rest[colon_pos + 1 :]
             path = path_part.lstrip("/")
@@ -183,12 +240,13 @@ class _BasePointer:
 
     @property
     def uri(self) -> str:
-        """Reconstruct the URI string for this pointer."""
+        """Reconstruct the canonical URI string for this pointer."""
         if self.scheme == "file":
             return f"file://{self.path}"
         return f"rclone:{self.remote}:///{self.path}"
 
     def _rclone_lsjson(self) -> list[dict[str, Any]]:
+        assert self.scheme == "rclone", "_rclone_lsjson() called on non-rclone pointer"
         result = self._rclone_run(["lsjson", f"{self.remote}:{self.path}", "--recursive"])
         data: list[dict[str, Any]] = json.loads(result.stdout or "[]")
         return data
@@ -208,60 +266,53 @@ class _BasePointer:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
 class MediaPointer(_BasePointer):
-    """Pointer to a media source directory. Supports read-only iteration."""
+    """Pointer to a media source directory.  Supports read-only iteration via scan()."""
 
-    def iter_files(self) -> Iterator[tuple[str, AbstractContextManager[Path]]]:
-        """Yield ``(relative_path, file_ctx)`` for every file under this pointer.
+    def scan(self) -> Iterator[MediaFile]:
+        """Yield a :class:`MediaFile` for every recognised media file under this pointer.
 
-        *file_ctx* is a context manager::
+        Each :class:`MediaFile` is a context manager.  Use it with ``with``::
 
-            for rel, file_ctx in pointer.iter_files():
-                with file_ctx as local_path:
-                    # local_path is valid here; cleaned up on with-block exit
-                    process(rel, local_path)
+            for mf in media.scan():
+                with mf:
+                    process(mf.local_path)
 
-        For ``file://`` pointers *file_ctx* is a no-op wrapper around the
-        existing local path.  For ``rclone:`` pointers the file is downloaded
-        inside the ``with`` block and the temp directory is deleted on exit,
-        so large remotes never exhaust local disk.
+        For ``file://`` sources the context entry/exit are no-ops and the path
+        is always valid.  For ``rclone:`` sources a single shared temporary
+        directory is created for the duration of the scan; each file is
+        downloaded on context entry and its local copy is deleted on exit,
+        keeping disk usage bounded to at most one file at a time.
         """
         if self.scheme == "file":
             root = Path(self.path)
             for p in sorted(root.rglob("*")):
                 if p.is_file():
-                    yield str(p.relative_to(root)), _LocalFile(p)
+                    ext = p.suffix.lower()
+                    media_type = _EXT_TO_TYPE.get(ext)
+                    if media_type is None:
+                        continue
+                    yield MediaFile(
+                        relative_path=str(p.relative_to(root)),
+                        media_type=media_type,
+                        _ctx=_LocalFile(p),
+                    )
         else:
-            for entry in self._rclone_lsjson():
-                if entry.get("IsDir"):
-                    continue
-                rel = entry["Path"]
-                yield rel, _RcloneFile(self, rel)
-
-    def scan(self) -> Iterator[MediaFile]:
-        """Yield a :class:`MediaFile` for every recognised media file under this pointer.
-
-        Files are yielded lazily, one at a time.  For ``rclone:`` sources each
-        file is downloaded immediately before yielding and the local temp copy is
-        deleted before the next file is fetched, so large remotes never exhaust
-        local disk.
-
-        **Important:** for rclone sources, ``MediaFile.local_path`` is only valid
-        for the duration of a single loop iteration.  See :class:`MediaFile` for
-        the full lifetime contract.
-        """
-        for relative_path, file_ctx in self.iter_files():
-            ext = Path(relative_path).suffix.lower()
-            media_type = _EXT_TO_TYPE.get(ext)
-            if media_type is None:
-                continue
-            with file_ctx as local_path:
-                yield MediaFile(
-                    relative_path=relative_path,
-                    local_path=local_path,
-                    media_type=media_type,
-                )
+            with tempfile.TemporaryDirectory(prefix="indexer_scan_") as tmpdir_str:
+                tmpdir = Path(tmpdir_str)
+                for entry in self._rclone_lsjson():
+                    if entry.get("IsDir"):
+                        continue
+                    rel = entry["Path"]
+                    ext = Path(rel).suffix.lower()
+                    media_type = _EXT_TO_TYPE.get(ext)
+                    if media_type is None:
+                        continue
+                    yield MediaFile(
+                        relative_path=rel,
+                        media_type=media_type,
+                        _ctx=_RcloneFile(self, rel, tmpdir),
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -269,9 +320,8 @@ class MediaPointer(_BasePointer):
 # ---------------------------------------------------------------------------
 
 
-@dataclass
 class StorePointer(_BasePointer):
-    """Pointer to a store directory. Supports directory-level get/put/rename/delete."""
+    """Pointer to a store directory.  Supports directory-level get/put/rename/delete."""
 
     def put_dir(self, local_src: Path, dest_name: str | None = None) -> None:
         """Upload a local directory to this pointer location."""
@@ -285,9 +335,11 @@ class StorePointer(_BasePointer):
             self._rclone_run(["copy", str(local_src), f"{self.remote}:{remote_dest}"])
 
     def get_dir(self, name: str | None = None) -> Path:
-        """Download the directory at this pointer into a local temp dir.
+        """Return the local path to the named subdirectory.
 
-        Returns the local temp dir path; caller must clean up.
+        For ``file://`` sources this is the directory itself (no copy).
+        For ``rclone:`` sources the directory is downloaded to a fresh temp dir;
+        the caller is responsible for cleanup — prefer :meth:`get_dir_ctx`.
         """
         if self.scheme == "file":
             return Path(self.path) / name if name else Path(self.path)
@@ -295,6 +347,24 @@ class StorePointer(_BasePointer):
         remote_path = f"{self.path}/{name}" if name else self.path
         self._rclone_run(["copy", f"{self.remote}:{remote_path}", str(tmpdir)])
         return tmpdir
+
+    @contextmanager
+    def get_dir_ctx(self, name: str | None = None) -> Generator[Path, None, None]:
+        """Context manager that yields a local path to the named subdirectory.
+
+        For ``file://`` sources this is the directory itself (no copy, no
+        cleanup).  For ``rclone:`` sources the directory is downloaded into a
+        temporary folder which is automatically deleted on exit::
+
+            with store.get_dir_ctx("db") as local_db:
+                created_at = vector_store.created_at(local_db)
+        """
+        local = self.get_dir(name)
+        try:
+            yield local
+        finally:
+            if self.scheme == "rclone":
+                shutil.rmtree(local, ignore_errors=True)
 
     def has_dir(self, name: str) -> bool:
         """Return True if a subdirectory with this name exists at the pointer location."""
@@ -332,23 +402,3 @@ class StorePointer(_BasePointer):
                 shutil.rmtree(target)
         else:
             self._rclone_run(["purge", f"{self.remote}:{self.path}/{name}"])
-
-    @contextmanager
-    def get_dir_ctx(self, name: str | None = None) -> Generator[Path, None, None]:
-        """Context manager that yields a local path to the named subdirectory.
-
-        For ``file://`` pointers this is the directory itself (no copy, no
-        cleanup).  For ``rclone:`` pointers the directory is downloaded into a
-        temporary folder which is automatically deleted on context-manager exit,
-        so callers never need to manage cleanup manually::
-
-            with store.get_dir_ctx("db") as local_db:
-                created_at = vector_store.created_at(local_db)
-            # temp dir is gone here (rclone) or untouched (file://)
-        """
-        local = self.get_dir(name)
-        try:
-            yield local
-        finally:
-            if self.scheme == "rclone":
-                shutil.rmtree(local, ignore_errors=True)

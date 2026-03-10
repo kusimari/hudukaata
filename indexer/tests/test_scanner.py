@@ -25,10 +25,9 @@ def media_dir(tmp_path):
 
 class TestScan:
     def test_known_types_are_yielded(self, media_dir):
-        root, expected = media_dir
+        root, _ = media_dir
         p = MediaPointer.parse(f"file://{root}")
-        results = list(p.scan())
-        names = {f.relative_path for f in results}
+        names = {mf.relative_path for mf in p.scan()}
         assert "photo.jpg" in names
         assert "clip.mp4" in names
         assert "song.mp3" in names
@@ -37,20 +36,20 @@ class TestScan:
     def test_unknown_extensions_excluded(self, media_dir):
         root, _ = media_dir
         p = MediaPointer.parse(f"file://{root}")
-        results = list(p.scan())
-        assert all(not f.relative_path.endswith(".txt") for f in results)
+        assert all(not mf.relative_path.endswith(".txt") for mf in p.scan())
 
     def test_correct_media_types(self, media_dir):
-        root, expected = media_dir
+        root, _ = media_dir
         p = MediaPointer.parse(f"file://{root}")
-        by_name = {f.relative_path: f.media_type for f in p.scan()}
+        by_name = {mf.relative_path: mf.media_type for mf in p.scan()}
         assert by_name["photo.jpg"] == "image"
         assert by_name["clip.mp4"] == "video"
         assert by_name["song.mp3"] == "audio"
         assert by_name["sub/nested.png"] == "image"
 
-    def test_local_path_exists(self, media_dir):
+    def test_local_path_exists_inside_with(self, media_dir):
         root, _ = media_dir
         p = MediaPointer.parse(f"file://{root}")
         for mf in p.scan():
-            assert mf.local_path.exists()
+            with mf:
+                assert mf.local_path.exists()

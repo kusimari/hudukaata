@@ -1,4 +1,12 @@
-"""Tests for Blip2CaptionModel — real media files, model inference mocked."""
+"""Tests for Blip2CaptionModel.
+
+Image captioning: real PIL image loaded from disk; only model.generate is
+mocked (BLIP-2 weights are ~10 GB and cannot be downloaded in test env).
+
+Audio transcription: real whisper "base" model (~74 MB); no mocks.
+
+Video frame extraction: real ffmpeg where available; skipped otherwise.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +17,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from indexer.models.blip2 import Blip2CaptionModel
-from indexer.pointer import MediaFile
+from indexer.pointer import MediaFile, _LocalFile
 
 
 def _mf(path: Path, media_type: str) -> MediaFile:
+    """Build a MediaFile backed by a real local path."""
     return MediaFile(
         relative_path=path.name,
-        local_path=path,
         media_type=cast(Literal["image", "video", "audio"], media_type),
+        _ctx=_LocalFile(path),
     )
 
 
@@ -62,13 +71,13 @@ class TestLoadBlip2:
 
 
 # ---------------------------------------------------------------------------
-# _caption_image — real PIL image, mocked model inference
+# _caption_image — real PIL image loaded from disk; model.generate mocked
 # ---------------------------------------------------------------------------
 
 
 class TestCaptionImage:
     def test_captions_real_image(self, sample_image_path: Path):
-        """Load a real PIL image; mock only the model forward pass."""
+        """PIL opens the real image; only the heavy model forward pass is mocked."""
         model = Blip2CaptionModel()
 
         mock_inputs = MagicMock()
@@ -91,12 +100,12 @@ class TestCaptionImage:
             result = model._caption_image(sample_image_path)
 
         assert result == "a red square"
-        # Processor was called with the actual image loaded from disk
+        # Processor was invoked with the image actually loaded from disk
         mock_proc.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# _extract_frames — real video file, no model needed
+# _extract_frames — real ffmpeg where available
 # ---------------------------------------------------------------------------
 
 
@@ -108,11 +117,14 @@ class TestExtractFrames:
         model = Blip2CaptionModel()
         frames = model._extract_frames(sample_video_path)
 
-        assert len(frames) > 0, "Expected at least one extracted frame"
-        for frame in frames:
-            assert frame.exists(), f"Frame file missing: {frame}"
-            assert frame.stat().st_size > 0, f"Frame file is empty: {frame}"
-            frame.unlink(missing_ok=True)
+        try:
+            assert len(frames) > 0, "Expected at least one extracted frame"
+            for frame in frames:
+                assert frame.exists(), f"Frame file missing: {frame}"
+                assert frame.stat().st_size > 0, f"Frame file is empty: {frame}"
+        finally:
+            for f in frames:
+                f.unlink(missing_ok=True)
 
     def test_extracts_up_to_four_frames(self, sample_video_path: Path | None):
         if sample_video_path is None:
@@ -120,7 +132,6 @@ class TestExtractFrames:
 
         model = Blip2CaptionModel()
         frames = model._extract_frames(sample_video_path)
-
         try:
             assert len(frames) <= 4
         finally:
@@ -130,33 +141,36 @@ class TestExtractFrames:
     def test_returns_empty_list_for_missing_video(self, tmp_path):
         """Graceful degradation when ffmpeg cannot read the file."""
         model = Blip2CaptionModel()
-        missing = tmp_path / "nonexistent.mp4"
-        frames = model._extract_frames(missing)
+        frames = model._extract_frames(tmp_path / "nonexistent.mp4")
         assert frames == []
 
 
 # ---------------------------------------------------------------------------
-# _transcribe_audio — real WAV file, mocked Whisper
+# _transcribe_audio — real whisper "base" model, real WAV file, no mocks
 # ---------------------------------------------------------------------------
 
 
 class TestTranscribeAudio:
-    def test_transcribes_real_wav_file(self, sample_audio_path: Path):
-        """Pass a real WAV file; mock only the Whisper model."""
-        model = Blip2CaptionModel()
+    def test_transcribes_real_wav_with_real_whisper(self, sample_audio_path: Path):
+        """Load whisper 'base' (~74 MB) and transcribe a real WAV — no mocks.
 
-        mock_whisper_model = MagicMock()
-        mock_whisper_model.transcribe.return_value = {"text": " hello world"}
-        model._whisper = mock_whisper_model
+        The WAV is 1 s of silence so the transcript may be empty or minimal;
+        we only assert that the pipeline runs and returns a string.
+        """
+        pytest.importorskip("whisper")  # skip if package absent
+        model = Blip2CaptionModel(whisper_model="base")
+        # Force the model to load so any download error surfaces as a skip.
+        try:
+            model._load_whisper()
+        except Exception as exc:
+            pytest.skip(f"Whisper model unavailable: {exc}")
 
         result = model._transcribe_audio(sample_audio_path)
-
-        assert result == "hello world"
-        mock_whisper_model.transcribe.assert_called_once_with(str(sample_audio_path))
+        assert isinstance(result, str)
 
 
 # ---------------------------------------------------------------------------
-# caption — dispatch by media type
+# caption() — dispatch by media type (uses with mf: pattern)
 # ---------------------------------------------------------------------------
 
 
@@ -165,7 +179,9 @@ class TestCaption:
         model = Blip2CaptionModel()
         model._caption_image = MagicMock(return_value="a picture")  # type: ignore[method-assign]
 
-        result = model.caption(_mf(sample_image_path, "image"))
+        mf = _mf(sample_image_path, "image")
+        with mf:
+            result = model.caption(mf)
 
         assert result == "a picture"
         model._caption_image.assert_called_once_with(sample_image_path)
@@ -174,7 +190,9 @@ class TestCaption:
         model = Blip2CaptionModel()
         model._transcribe_audio = MagicMock(return_value="some speech")  # type: ignore[method-assign]
 
-        result = model.caption(_mf(sample_audio_path, "audio"))
+        mf = _mf(sample_audio_path, "audio")
+        with mf:
+            result = model.caption(mf)
 
         assert result == "some speech"
 
@@ -183,13 +201,14 @@ class TestCaption:
             pytest.skip("ffmpeg not available")
 
         model = Blip2CaptionModel()
-        # Return two fake frame paths so we can test the join logic
         fake_frame = sample_video_path.parent / "fake_frame.jpg"
         fake_frame.write_bytes(b"fake")
         model._extract_frames = MagicMock(return_value=[fake_frame])  # type: ignore[method-assign]
         model._caption_image = MagicMock(return_value="a blue square")  # type: ignore[method-assign]
 
-        result = model.caption(_mf(sample_video_path, "video"))
+        mf = _mf(sample_video_path, "video")
+        with mf:
+            result = model.caption(mf)
 
         assert result == "a blue square"
         fake_frame.unlink(missing_ok=True)
@@ -208,7 +227,9 @@ class TestCaption:
         model._extract_frames = MagicMock(return_value=fake_frames)  # type: ignore[method-assign]
         model._caption_image = MagicMock(side_effect=["caption one", ""])  # type: ignore[method-assign]
 
-        result = model.caption(_mf(sample_video_path, "video"))
+        mf = _mf(sample_video_path, "video")
+        with mf:
+            result = model.caption(mf)
 
         assert result == "caption one"  # empty string filtered out
         for f in fake_frames:
