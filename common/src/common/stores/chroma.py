@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from indexer.stores.base import VectorStore
+from common.stores.base import VectorStore
 
 _META_FILE = "db_meta.json"
 
@@ -42,7 +42,7 @@ class ChromaVectorStore(VectorStore):
 
         # Use a PersistentClient in a temp dir so data is on disk and can be
         # moved atomically to the final location in save().
-        tmp_dir = Path(tempfile.mkdtemp(prefix="indexer_chroma_"))
+        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_"))
         try:
             client = chromadb.PersistentClient(
                 path=str(tmp_dir),
@@ -71,8 +71,14 @@ class ChromaVectorStore(VectorStore):
         )
 
     def save(self, local_path: Path) -> None:
-        if self._client is None or self._tmp_dir is None:
-            raise RuntimeError("Store not initialised; call create_empty() before save()")
+        if self._tmp_dir is None:
+            # _tmp_dir is only set by create_empty(); load() does not set it.
+            raise RuntimeError(
+                "save() requires the store to have been initialised via create_empty(). "
+                "load() is for read queries only and does not support re-saving."
+            )
+        if self._client is None:
+            raise RuntimeError("Store not initialised; call create_empty() first")
         # Release client/collection handles before moving the directory.
         # ChromaDB's PersistentClient may hold open file handles; closing them
         # first avoids failures on Windows and certain Linux configurations.

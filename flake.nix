@@ -11,6 +11,25 @@
       devShells = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
         in {
+          common = pkgs.mkShell {
+            name = "common";
+            packages = [
+              pkgs.python311
+              pkgs.stdenv.cc.cc.lib  # libstdc++.so.6 for pip-installed native extensions
+            ];
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              FLAKE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+              VENV="$FLAKE_ROOT/common/.venv"
+              if [ ! -d "$VENV" ]; then
+                python -m venv "$VENV"
+              fi
+              source "$VENV/bin/activate"
+              python -m pip install --quiet -e "$FLAKE_ROOT/common[dev]"
+              echo "common env ready (python 3.11)"
+            '';
+          };
+
           indexer = pkgs.mkShell {
             name = "indexer";
             packages = [
@@ -31,8 +50,30 @@
                 python -m venv "$VENV"
               fi
               source "$VENV/bin/activate"
+              python -m pip install --quiet -e "$FLAKE_ROOT/common"
               python -m pip install --quiet -e "$FLAKE_ROOT/indexer[dev]"
               echo "indexer env ready (ffmpeg, rclone, python 3.11)"
+            '';
+          };
+
+          search = pkgs.mkShell {
+            name = "search";
+            packages = [
+              pkgs.rclone        # remote store support
+              pkgs.python311
+              pkgs.stdenv.cc.cc.lib  # libstdc++.so.6 for pip-installed native extensions
+            ];
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              FLAKE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+              VENV="$FLAKE_ROOT/search/.venv"
+              if [ ! -d "$VENV" ]; then
+                python -m venv "$VENV"
+              fi
+              source "$VENV/bin/activate"
+              python -m pip install --quiet -e "$FLAKE_ROOT/common"
+              python -m pip install --quiet -e "$FLAKE_ROOT/search[dev]"
+              echo "search env ready (rclone, python 3.11)"
             '';
           };
         }

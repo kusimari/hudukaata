@@ -7,9 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-
-from indexer.stores.chroma import _META_FILE, ChromaVectorStore
-from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
+from common.stores.chroma import _META_FILE, ChromaVectorStore
+from common.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 
 
 class TestCreateEmptyAndAdd:
@@ -50,7 +49,7 @@ class TestSave:
 
     def test_save_raises_if_not_initialised(self):
         store = ChromaVectorStore()
-        with pytest.raises(RuntimeError, match="not initialised"):
+        with pytest.raises(RuntimeError, match="create_empty"):
             store.save(Path("/tmp/nowhere"))
 
     def test_save_tmp_dir_cleared(self, tmp_path):

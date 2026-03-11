@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
-from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
+from common.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 
 
 @pytest.fixture(scope="module")
@@ -57,11 +56,3 @@ class TestVectorize:
     def test_empty_string_returns_vector(self, vectorizer):
         result = vectorizer.vectorize("")
         assert len(result) == vectorizer.dimension
-
-    def test_format_text_helper(self):
-        from indexer.vectorizers.sentence_transformer import format_text
-
-        text = format_text("a cat", {"width": "100", "height": "200"})
-        assert "a cat" in text
-        assert "width" in text
-        assert "height" in text

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from indexer.text import format_text as format_text  # re-exported for callers
-from indexer.vectorizers.base import Vectorizer
+from common.vectorizers.base import Vectorizer
 
 
 class SentenceTransformerVectorizer(Vectorizer):
