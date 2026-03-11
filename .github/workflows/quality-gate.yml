@@ -24,48 +24,38 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: indexer
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: cachix/install-nix-action@v27
         with:
-          python-version: "3.11"
-
-      - name: Install dev dependencies
-        run: pip install -e ".[dev]"
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
       - name: ruff lint
-        run: ruff check src/ tests/
+        run: nix develop .#indexer --command bash -c "cd indexer && ruff check src/ tests/"
 
       - name: ruff format check
-        run: ruff format --check src/ tests/
+        run: nix develop .#indexer --command bash -c "cd indexer && ruff format --check src/ tests/"
 
       - name: mypy
-        run: python -m mypy src/indexer
+        run: nix develop .#indexer --command bash -c "cd indexer && python -m mypy src/indexer"
 
   test:
     name: test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: indexer
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: cachix/install-nix-action@v27
         with:
-          python-version: "3.11"
-
-      - name: Install dev dependencies
-        run: pip install -e ".[dev]"
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
       - name: pytest
-        run: pytest tests/ -v
+        run: nix develop .#indexer --command bash -c "cd indexer && pytest tests/ -v"
 
   comment-on-failure:
     name: comment-on-failure

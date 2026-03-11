@@ -29,3 +29,16 @@ hudukaata/
   search/        # search server
   .kdevkit/      # dev workflow metadata
 ```
+
+## Dev Environments
+
+Each sub-package has a named Nix devShell in `flake.nix` at the repo root.
+Before starting a coding session on a sub-package, enter its shell:
+
+| Package   | Command                  |
+|-----------|--------------------------|
+| indexer   | `nix develop .#indexer`  |
+
+The shell provides system tools (ffmpeg, rclone) and installs Python
+dependencies automatically. Run all linting, type checking, and tests from
+within the shell.

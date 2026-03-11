@@ -5,7 +5,7 @@ mocked (BLIP-2 weights are ~10 GB and cannot be downloaded in test env).
 
 Audio transcription: real whisper "base" model (~74 MB); no mocks.
 
-Video frame extraction: real ffmpeg where available; skipped otherwise.
+Video frame extraction: real ffmpeg (provided by nix devShell).
 """
 
 from __future__ import annotations
@@ -105,15 +105,12 @@ class TestCaptionImage:
 
 
 # ---------------------------------------------------------------------------
-# _extract_frames — real ffmpeg where available
+# _extract_frames — real ffmpeg (guaranteed by nix devShell)
 # ---------------------------------------------------------------------------
 
 
 class TestExtractFrames:
-    def test_extracts_frames_from_real_video(self, sample_video_path: Path | None):
-        if sample_video_path is None:
-            pytest.skip("ffmpeg not available")
-
+    def test_extracts_frames_from_real_video(self, sample_video_path: Path):
         model = Blip2CaptionModel()
         frames = model._extract_frames(sample_video_path)
 
@@ -126,10 +123,7 @@ class TestExtractFrames:
             for f in frames:
                 f.unlink(missing_ok=True)
 
-    def test_extracts_up_to_four_frames(self, sample_video_path: Path | None):
-        if sample_video_path is None:
-            pytest.skip("ffmpeg not available")
-
+    def test_extracts_up_to_four_frames(self, sample_video_path: Path):
         model = Blip2CaptionModel()
         frames = model._extract_frames(sample_video_path)
         try:
@@ -157,11 +151,11 @@ class TestTranscribeAudio:
         The WAV is 1 s of silence so the transcript may be empty or minimal;
         we only assert that the pipeline runs and returns a string.
         """
-        pytest.importorskip("whisper")  # skip if package absent
+        pytest.importorskip("whisper")  # skip cleanly if the package is absent
         import shutil
 
         if shutil.which("ffmpeg") is None:
-            pytest.skip("ffmpeg not available")
+            pytest.skip("ffmpeg not available — run tests inside `nix develop .#indexer`")
         model = Blip2CaptionModel(whisper_model="base")
         # Force the model to load so any download error surfaces as a skip.
         try:
@@ -200,10 +194,7 @@ class TestCaption:
 
         assert result == "some speech"
 
-    def test_video_combines_frame_captions(self, sample_video_path: Path | None):
-        if sample_video_path is None:
-            pytest.skip("ffmpeg not available")
-
+    def test_video_combines_frame_captions(self, sample_video_path: Path):
         model = Blip2CaptionModel()
         fake_frame = sample_video_path.parent / "fake_frame.jpg"
         fake_frame.write_bytes(b"fake")
@@ -217,10 +208,7 @@ class TestCaption:
         assert result == "a blue square"
         fake_frame.unlink(missing_ok=True)
 
-    def test_video_skips_empty_captions(self, sample_video_path: Path | None):
-        if sample_video_path is None:
-            pytest.skip("ffmpeg not available")
-
+    def test_video_skips_empty_captions(self, sample_video_path: Path):
         model = Blip2CaptionModel()
         fake_frames = []
         for i in range(2):

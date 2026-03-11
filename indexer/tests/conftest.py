@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -36,14 +35,16 @@ def sample_audio_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def sample_video_path(tmp_path_factory: pytest.TempPathFactory) -> Path | None:
+def sample_video_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A small MP4 (2 second, 64x64 blue, 1 fps) generated with ffmpeg.
 
-    Returns ``None`` when ffmpeg is not available; tests should skip in that case.
+    The nix devShell guarantees ffmpeg is present; outside that environment
+    tests that depend on this fixture will skip rather than error.
     """
-    if not shutil.which("ffmpeg"):
-        return None
+    import shutil
 
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not available — run tests inside `nix develop .#indexer`")
     path = tmp_path_factory.mktemp("media") / "sample.mp4"
     try:
         subprocess.run(
@@ -59,6 +60,6 @@ def sample_video_path(tmp_path_factory: pytest.TempPathFactory) -> Path | None:
             capture_output=True,
             check=True,
         )
-    except subprocess.CalledProcessError:
-        return None
+    except subprocess.CalledProcessError as exc:
+        pytest.skip(f"ffmpeg failed to generate sample video: {exc}")
     return path
