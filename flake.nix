@@ -17,10 +17,12 @@
               pkgs.ffmpeg        # frame extraction + audio decode (ffprobe included)
               pkgs.rclone        # remote media / store support
               pkgs.python311
+              pkgs.stdenv.cc.cc.lib  # libstdc++.so.6 for pip-installed native extensions (numpy, etc.)
               # Use python -m pip (from the venv) rather than pkgs pip to avoid
               # version mismatches between the nixpkgs pip and the venv python.
             ];
             shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
               # Anchor to the flake root regardless of the cwd from which
               # `nix develop` was invoked.
               FLAKE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
