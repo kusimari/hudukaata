@@ -22,3 +22,6 @@ env/
 
 # Pytest
 .pytest_cache/
+
+# direnv
+.direnv/

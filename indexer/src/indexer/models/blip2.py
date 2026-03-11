@@ -154,7 +154,13 @@ class Blip2CaptionModel(CaptionModel):
                     capture_output=True,
                     check=True,
                 )
-                frame_paths.append(tmp)
+                if tmp.stat().st_size > 0:
+                    frame_paths.append(tmp)
+                else:
+                    tmp.unlink(missing_ok=True)
+                    logger.debug(
+                        "ffmpeg wrote empty frame at offset %.2f from %s; skipping", offset, path
+                    )
             except Exception as exc:
                 tmp.unlink(missing_ok=True)
                 logger.warning(
