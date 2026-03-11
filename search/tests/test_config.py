@@ -9,43 +9,31 @@ from search.config import Settings
 
 
 class TestSettings:
-    def test_defaults(self, monkeypatch) -> None:
-        monkeypatch.setenv("SEARCH_STORE", "file:///data/store")
-        s = Settings()
+    def test_defaults(self) -> None:
+        s = Settings(store="file:///data/store")
         assert s.store == "file:///data/store"
         assert s.port == 8080
         assert s.top_k == 5
         assert s.log_level == "INFO"
 
-    def test_custom_values(self, monkeypatch) -> None:
-        monkeypatch.setenv("SEARCH_STORE", "file:///custom")
-        monkeypatch.setenv("SEARCH_PORT", "9090")
-        monkeypatch.setenv("SEARCH_TOP_K", "10")
-        monkeypatch.setenv("SEARCH_LOG_LEVEL", "DEBUG")
-        s = Settings()
+    def test_custom_values(self) -> None:
+        s = Settings(store="file:///custom", port=9090, top_k=10, log_level="DEBUG")
         assert s.port == 9090
         assert s.top_k == 10
         assert s.log_level == "DEBUG"
 
-    def test_missing_store_raises(self, monkeypatch) -> None:
-        # Ensure SEARCH_STORE is not set
-        monkeypatch.delenv("SEARCH_STORE", raising=False)
+    def test_missing_store_raises(self) -> None:
         with pytest.raises(ValidationError):
             Settings()
 
-    def test_invalid_store_uri_raises(self, monkeypatch) -> None:
-        monkeypatch.setenv("SEARCH_STORE", "http://not-valid")
+    def test_invalid_store_uri_raises(self) -> None:
         with pytest.raises(ValidationError):
-            Settings()
+            Settings(store="http://not-valid")
 
-    def test_invalid_log_level_raises(self, monkeypatch) -> None:
-        monkeypatch.setenv("SEARCH_STORE", "file:///x")
-        monkeypatch.setenv("SEARCH_LOG_LEVEL", "VERBOSE")
+    def test_invalid_log_level_raises(self) -> None:
         with pytest.raises(ValidationError):
-            Settings()
+            Settings(store="file:///x", log_level="VERBOSE")
 
-    def test_top_k_zero_raises(self, monkeypatch) -> None:
-        monkeypatch.setenv("SEARCH_STORE", "file:///x")
-        monkeypatch.setenv("SEARCH_TOP_K", "0")
+    def test_top_k_zero_raises(self) -> None:
         with pytest.raises(ValidationError):
-            Settings()
+            Settings(store="file:///x", top_k=0)

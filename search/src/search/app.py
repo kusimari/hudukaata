@@ -8,6 +8,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -92,3 +93,14 @@ def readyz() -> dict[str, str]:
     """Readiness probe — returns 503 until the index is loaded."""
     _get_ctx()
     return {"status": "ready"}
+
+
+if __name__ == "__main__":
+    settings = Settings()
+    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    uvicorn.run(
+        "search.app:app",
+        host="0.0.0.0",
+        port=settings.port,
+        log_level=settings.log_level.lower(),
+    )
