@@ -17,9 +17,8 @@ hudukaata/
 
 ## Local commands
 
-Run all commands from `indexer/` inside the dev environment. The repo uses
-direnv + nix-direnv: the environment activates automatically on `cd` if direnv
-is installed. Otherwise enter it manually with `nix develop .#indexer`.
+Run all commands from `indexer/`. All tools (ruff, mypy, pytest, ffmpeg, rclone)
+are provided by the Nix devShell — they are not assumed to be installed globally.
 
 ```bash
 # Lint
@@ -43,10 +42,26 @@ ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/
 
 ## Mandatory workflow after every code change
 
-The loop is: **Code → Quality → Code → Test → Push**.
+The loop is: **Setup → Code → Quality → Code → Test → Push**.
 
 Quality uses a configurable score threshold — it does not require zero findings.
 Tests require zero failures.
+
+---
+
+### Step 0 — Setup environment
+
+Run once at the start of every coding session (or after any `flake.nix` change):
+
+```bash
+nix develop .#indexer --command bash -c "echo env ready"
+```
+
+This creates `indexer/.venv`, installs all Python dependencies, and verifies
+that system tools (ffmpeg, rclone) are available. All subsequent steps assume
+this has been run. If a tool is missing or a dependency fails to install, fix
+`flake.nix` or `pyproject.toml` — do not add runtime guards in application code
+or tests.
 
 ---
 

@@ -138,6 +138,31 @@ class TestExtractFrames:
         frames = model._extract_frames(tmp_path / "nonexistent.mp4")
         assert frames == []
 
+    def test_skips_and_unlinks_zero_byte_frames(self, tmp_path: Path):
+        """ffmpeg exits 0 but writes a 0-byte file (e.g. seek past last frame).
+
+        Alternates: 0-byte, real, 0-byte, real — expects 2 frames returned.
+        """
+        import json as _json
+
+        frame_contents = [b"", b"data1", b"", b"data2"]
+
+        def _fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
+            result = MagicMock()
+            if cmd[0] == "ffprobe":
+                result.stdout = _json.dumps({"format": {"duration": "4.0"}})
+            else:
+                # ffmpeg command: [..., str(tmp), "-y"] — output file is cmd[-2]
+                Path(cmd[-2]).write_bytes(frame_contents.pop(0))
+            return result
+
+        model = Blip2CaptionModel()
+        with patch("indexer.models.blip2.subprocess.run", side_effect=_fake_run):
+            frames = model._extract_frames(tmp_path / "fake.mp4")
+
+        assert len(frames) == 2
+        assert all(f.stat().st_size > 0 for f in frames)
+
 
 # ---------------------------------------------------------------------------
 # _transcribe_audio — real whisper "base" model, real WAV file, no mocks
@@ -150,14 +175,11 @@ class TestTranscribeAudio:
 
         The WAV is 1 s of silence so the transcript may be empty or minimal;
         we only assert that the pipeline runs and returns a string.
+        whisper and ffmpeg are guaranteed by the Nix devShell.
         """
-        pytest.importorskip("whisper")  # skip cleanly if the package is absent
-        import shutil
-
-        if shutil.which("ffmpeg") is None:
-            pytest.skip("ffmpeg not available — run tests inside `nix develop .#indexer`")
         model = Blip2CaptionModel(whisper_model="base")
-        # Force the model to load so any download error surfaces as a skip.
+        # Model weights (~74 MB) may not be downloaded in all environments;
+        # skip rather than fail so CI without internet access stays green.
         try:
             model._load_whisper()
         except Exception as exc:

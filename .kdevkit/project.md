@@ -32,32 +32,40 @@ hudukaata/
 
 ## Dev Environments
 
-Each sub-package has a named Nix devShell in `flake.nix` at the repo root.
-The shell provides system tools (ffmpeg, rclone) and auto-installs Python
-dependencies.
+`flake.nix` at the repo root is the single source of truth for all dev
+environments. Each sub-package has a named devShell that provides system tools
+(ffmpeg, rclone) and auto-installs Python dependencies via a `shellHook`.
 
-### Auto-activation (recommended)
+### Desktop / laptop (direnv auto-activation)
 
-The repo ships an `.envrc` that auto-activates the shell via direnv:
+Each sub-package folder ships an `.envrc` that activates the correct shell
+automatically when you `cd` into it.
 
+One-time machine setup:
 ```bash
-# one-time per machine
 nix profile install nixpkgs#direnv nixpkgs#nix-direnv
-
-# one-time per clone
-direnv allow
-
-# add to ~/.bashrc or ~/.zshrc (if not already present)
-eval "$(direnv hook bash)"   # or: eval "$(direnv hook zsh)"
+echo 'eval "$(direnv hook bash)"' >> ~/.bashrc   # or zsh
 ```
 
-After setup, `cd`-ing into the repo (or any subdirectory) is enough — no
-manual invocation needed.
+One-time per clone, per package:
+```bash
+cd indexer && direnv allow
+```
 
-### Manual activation (fallback)
+After that, `cd indexer` loads the indexer environment; `cd search` (future)
+loads the search environment. No manual invocation needed.
+
+### Cloud / CI (explicit setup step)
+
+Do not rely on direnv. Run the setup command as the first explicit step:
+```bash
+nix develop .#indexer --command bash -c "echo env ready"
+```
+Then run quality, lint, and test commands as subsequent steps, each wrapped in
+`nix develop .#indexer --command bash -c "..."`.
+
+### Manual activation (fallback for any context)
 
 | Package   | Command                  |
 |-----------|--------------------------|
 | indexer   | `nix develop .#indexer`  |
-
-Run all linting, type checking, and tests from within the activated environment.

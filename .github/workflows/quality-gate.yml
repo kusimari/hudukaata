@@ -33,6 +33,9 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
+      - name: setup env
+        run: nix develop .#indexer --command bash -c "echo env ready"
+
       - name: ruff lint
         run: nix develop .#indexer --command bash -c "cd indexer && ruff check src/ tests/"
 
@@ -54,8 +57,11 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
+      - name: setup env
+        run: nix develop .#indexer --command bash -c "echo env ready"
+
       - name: pytest
-        run: nix develop .#indexer --command bash -c "cd indexer && pytest tests/ -v"
+        run: nix develop .#indexer --command bash -c "cd indexer && python -m pytest tests/ -v"
 
   comment-on-failure:
     name: comment-on-failure
