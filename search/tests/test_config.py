@@ -22,7 +22,10 @@ class TestSettings:
         assert s.top_k == 10
         assert s.log_level == "DEBUG"
 
-    def test_missing_store_raises(self) -> None:
+    def test_missing_store_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Remove SEARCH_STORE to get a hermetic environment: the test must not
+        # depend on whatever the caller's shell happens to have exported.
+        monkeypatch.delenv("SEARCH_STORE", raising=False)
         with pytest.raises(ValidationError):
             Settings()
 

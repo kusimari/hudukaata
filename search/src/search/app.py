@@ -20,7 +20,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    settings = Settings()
+    # Re-use settings pre-loaded by __main__ (single env-read, keeps port /
+    # log_level in sync with what uvicorn was told).  Fall back to a fresh
+    # Settings() when the server is started externally, e.g.
+    # `uvicorn search.app:app`.
+    settings: Settings | None = getattr(app.state, "settings", None)
+    if settings is None:
+        settings = Settings()
     try:
         app.state.ctx = load(settings)
     except Exception:
@@ -97,9 +103,13 @@ def readyz() -> dict[str, str]:
 
 if __name__ == "__main__":
     settings = Settings()
+    # Store on app.state so lifespan reuses this exact instance instead of
+    # constructing a second Settings().  Pass `app` directly (not the import
+    # string) so the state is preserved across the uvicorn startup boundary.
+    app.state.settings = settings
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
     uvicorn.run(
-        "search.app:app",
+        app,
         host="0.0.0.0",
         port=settings.port,
         log_level=settings.log_level.lower(),
