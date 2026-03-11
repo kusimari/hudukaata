@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     All fields can be set via environment variables with the ``SEARCH_`` prefix.
     Example::
 
-        SEARCH_STORE=file:///data/mystore SEARCH_PORT=8080 python -m search
+        SEARCH_STORE=file:///data/mystore SEARCH_MEDIA=file:///data/media SEARCH_PORT=8080 python -m search
     """
 
     model_config = SettingsConfigDict(env_prefix="SEARCH_")
@@ -27,15 +27,25 @@ class Settings(BaseSettings):
     - ``rclone:remote-name:///path/on/remote``
     """
 
+    media: str
+    """Media root URI — the directory that holds the original media files.
+
+    The ``relative_path`` values returned by ``/search`` are resolved against
+    this root when serving ``/media/{path}`` requests.
+
+    Accepted formats:
+    - ``file:///absolute/path``
+    - ``rclone:remote-name:///path/on/remote``
+    """
+
     port: int = 8080
     top_k: int = 5
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
-    @field_validator("store")
+    @field_validator("store", "media")
     @classmethod
-    def store_must_be_valid_uri(cls, v: str) -> str:
-        # Validate the URI format early so errors surface at startup, not on
-        # first request.
+    def uri_must_be_valid(cls, v: str) -> str:
+        # Validate both URIs at startup so misconfiguration fails fast.
         from common.pointer import StorePointer
 
         StorePointer.parse(v)  # raises ValueError on invalid URI

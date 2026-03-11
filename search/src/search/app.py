@@ -1,21 +1,27 @@
-"""FastAPI application — search endpoint and health check."""
+"""FastAPI application — search endpoint, media serving, and health checks."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+import mimetypes
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from search.config import Settings
 from search.startup import AppState, load
 
 logger = logging.getLogger(__name__)
+
+_CHUNK_SIZE = 65_536
 
 
 @asynccontextmanager
@@ -43,6 +49,15 @@ app = FastAPI(
     description="Semantic search over the media index.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# Allow browsers to call this server from any origin (e.g. the webapp running
+# on a different port).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
 )
 
 
@@ -86,6 +101,37 @@ async def search(
     vector = await asyncio.to_thread(ctx.vectorizer.vectorize, q)
     raw_results = ctx.vector_store.query(vector, n_results=n if n is not None else ctx.top_k)
     return [_to_result(r) for r in raw_results]
+
+
+@app.get("/media/{path:path}")
+async def media(path: str) -> StreamingResponse:
+    """Stream a media file from the configured media root by its relative path."""
+    ctx = _get_ctx()
+
+    # Prevent path traversal: reject any path that contains '..'.
+    if ".." in Path(path).parts:
+        raise HTTPException(status_code=400, detail="Invalid path.")
+
+    def _stream_file(local_path: Path) -> Iterator[bytes]:
+        with local_path.open("rb") as fh:
+            while True:
+                chunk = fh.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                yield chunk
+
+    def _serve() -> StreamingResponse:
+        with ctx.media_ptr.get_file_ctx(path) as local_path:
+            if not local_path.is_file():
+                raise HTTPException(status_code=404, detail="Media file not found.")
+            mime_type, _ = mimetypes.guess_type(str(local_path))
+            content_type = mime_type or "application/octet-stream"
+            # Read the file fully inside the context so the rclone temp dir
+            # still exists when we stream the bytes.
+            data = local_path.read_bytes()
+        return StreamingResponse(iter([data]), media_type=content_type)
+
+    return await asyncio.to_thread(_serve)
 
 
 @app.get("/healthz")

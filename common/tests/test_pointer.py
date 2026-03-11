@@ -137,3 +137,38 @@ class TestFileSchemeDirOps:
         sp = StorePointer(scheme="file", remote=None, path=str(store_root))
         # Should not raise
         sp.delete_dir("nonexistent")
+
+
+class TestGetFileCtxFileScheme:
+    def test_yields_correct_path(self, tmp_path) -> None:
+        root = tmp_path / "media"
+        root.mkdir()
+        (root / "photo.jpg").write_bytes(b"\xff\xd8\xff")
+
+        sp = StorePointer(scheme="file", remote=None, path=str(root))
+        with sp.get_file_ctx("photo.jpg") as p:
+            assert p == root / "photo.jpg"
+            assert p.read_bytes() == b"\xff\xd8\xff"
+
+    def test_yields_nested_path(self, tmp_path) -> None:
+        root = tmp_path / "media"
+        sub = root / "2024"
+        sub.mkdir(parents=True)
+        (sub / "img.png").write_bytes(b"PNG")
+
+        sp = StorePointer(scheme="file", remote=None, path=str(root))
+        with sp.get_file_ctx("2024/img.png") as p:
+            assert p == root / "2024" / "img.png"
+            assert p.read_bytes() == b"PNG"
+
+    def test_no_cleanup_of_file_on_exit(self, tmp_path) -> None:
+        root = tmp_path / "media"
+        root.mkdir()
+        f = root / "keep.jpg"
+        f.write_bytes(b"data")
+
+        sp = StorePointer(scheme="file", remote=None, path=str(root))
+        with sp.get_file_ctx("keep.jpg"):
+            pass
+        # file:// source — original file must still exist after the context exits
+        assert f.exists()
