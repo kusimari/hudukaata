@@ -138,30 +138,52 @@ class TestExtractFrames:
         frames = model._extract_frames(tmp_path / "nonexistent.mp4")
         assert frames == []
 
-    def test_skips_and_unlinks_zero_byte_frames(self, tmp_path: Path):
-        """ffmpeg exits 0 but writes a 0-byte file (e.g. seek past last frame).
 
-        Alternates: 0-byte, real, 0-byte, real — expects 2 frames returned.
-        """
-        import json as _json
+# ---------------------------------------------------------------------------
+# _filter_frame_files — zero-byte frame filtering (real files, no subprocess mock)
+# ---------------------------------------------------------------------------
 
-        frame_contents = [b"", b"data1", b"", b"data2"]
 
-        def _fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
-            result = MagicMock()
-            if cmd[0] == "ffprobe":
-                result.stdout = _json.dumps({"format": {"duration": "4.0"}})
-            else:
-                # ffmpeg command: [..., str(tmp), "-y"] — output file is cmd[-2]
-                Path(cmd[-2]).write_bytes(frame_contents.pop(0))
-            return result
+class TestFilterFrameFiles:
+    def test_keeps_nonempty_removes_empty(self, tmp_path: Path):
+        f_empty = tmp_path / "f0.jpg"
+        f_empty.write_bytes(b"")
+        f_data = tmp_path / "f1.jpg"
+        f_data.write_bytes(b"data")
 
-        model = Blip2CaptionModel()
-        with patch("indexer.models.blip2.subprocess.run", side_effect=_fake_run):
-            frames = model._extract_frames(tmp_path / "fake.mp4")
+        result = Blip2CaptionModel._filter_frame_files([f_empty, f_data])
 
-        assert len(frames) == 2
-        assert all(f.stat().st_size > 0 for f in frames)
+        assert result == [f_data]
+        assert not f_empty.exists()
+        assert f_data.exists()
+
+    def test_all_nonempty_returns_all(self, tmp_path: Path):
+        files = [tmp_path / f"f{i}.jpg" for i in range(3)]
+        for f in files:
+            f.write_bytes(b"x")
+
+        result = Blip2CaptionModel._filter_frame_files(files)
+
+        assert result == files
+        assert all(f.exists() for f in files)
+
+    def test_all_empty_returns_empty_list(self, tmp_path: Path):
+        files = [tmp_path / f"f{i}.jpg" for i in range(3)]
+        for f in files:
+            f.write_bytes(b"")
+
+        result = Blip2CaptionModel._filter_frame_files(files)
+
+        assert result == []
+        assert not any(f.exists() for f in files)
+
+    def test_missing_file_treated_as_empty(self, tmp_path: Path):
+        missing = tmp_path / "ghost.jpg"
+        # Do not create the file — should be filtered out without raising
+
+        result = Blip2CaptionModel._filter_frame_files([missing])
+
+        assert result == []
 
 
 # ---------------------------------------------------------------------------

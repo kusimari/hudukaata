@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from indexer.stores.base import VectorStore
+from common.stores.base import VectorStore
 
 _META_FILE = "db_meta.json"
 
@@ -34,7 +34,7 @@ class ChromaVectorStore(VectorStore):
             path=str(local_path),
             settings=Settings(anonymized_telemetry=False),
         )
-        self._collection = self._client.get_or_create_collection(self.collection_name)
+        self._collection = self._client.get_collection(self.collection_name)
 
     def create_empty(self) -> None:
         import chromadb
@@ -42,7 +42,7 @@ class ChromaVectorStore(VectorStore):
 
         # Use a PersistentClient in a temp dir so data is on disk and can be
         # moved atomically to the final location in save().
-        tmp_dir = Path(tempfile.mkdtemp(prefix="indexer_chroma_"))
+        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_"))
         try:
             client = chromadb.PersistentClient(
                 path=str(tmp_dir),
@@ -71,28 +71,34 @@ class ChromaVectorStore(VectorStore):
         )
 
     def save(self, local_path: Path) -> None:
-        if self._client is None or self._tmp_dir is None:
-            raise RuntimeError("Store not initialised; call create_empty() before save()")
+        if self._tmp_dir is None:
+            # _tmp_dir is only set by create_empty(); load() does not set it.
+            raise RuntimeError(
+                "save() requires the store to have been initialised via create_empty(). "
+                "load() is for read queries only and does not support re-saving."
+            )
         # Release client/collection handles before moving the directory.
         # ChromaDB's PersistentClient may hold open file handles; closing them
         # first avoids failures on Windows and certain Linux configurations.
         self._client = None
         self._collection = None
-        # PersistentClient auto-persists on write; just move the directory.
-        # Clean up the temp dir on failure so it is never orphaned under /tmp.
+        # Write sidecar into the temp dir BEFORE the move so it travels
+        # atomically with the rest of the DB contents.  A crash after the move
+        # but before a post-move write would leave a valid DB with no timestamp.
         tmp_dir = self._tmp_dir
         self._tmp_dir = None
+        # Write sidecar and move are inside the same try block so a write_text
+        # failure also triggers cleanup of the orphaned temp directory.
         try:
+            meta = {"created_at": datetime.now(UTC).isoformat()}
+            (tmp_dir / _META_FILE).write_text(json.dumps(meta))
+            # PersistentClient auto-persists on write; just move the directory.
             if local_path.exists():
                 shutil.rmtree(local_path)
             shutil.move(str(tmp_dir), str(local_path))
         except Exception:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
-
-        # Write sidecar metadata
-        meta = {"created_at": datetime.now(UTC).isoformat()}
-        (local_path / _META_FILE).write_text(json.dumps(meta))
 
     def query(
         self,
@@ -119,5 +125,5 @@ class ChromaVectorStore(VectorStore):
         try:
             data = json.loads(meta_path.read_text())
             return datetime.fromisoformat(data["created_at"])
-        except Exception:
+        except (json.JSONDecodeError, KeyError, ValueError):
             return None

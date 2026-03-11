@@ -43,7 +43,7 @@ def _extract_image(path: Path) -> dict[str, str]:
         for key, val in tags.items():
             clean_key = key.replace(" ", "_").replace("/", "_")
             result[clean_key] = str(val)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         logger.debug("exifread failed for %s", path, exc_info=True)
     except Exception:
         logger.warning("Unexpected error from exifread for %s", path, exc_info=True)

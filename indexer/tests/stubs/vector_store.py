@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from indexer.stores.base import VectorStore
+from common.stores.base import VectorStore
 
 
 class StubVectorStore(VectorStore):

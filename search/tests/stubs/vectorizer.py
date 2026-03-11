@@ -1,4 +1,4 @@
-"""Stub vectorizer — returns a fixed-length zero vector."""
+"""Stub vectorizer for search tests."""
 
 from __future__ import annotations
 

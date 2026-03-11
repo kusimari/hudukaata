@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+from common.meta import IndexMeta
+from common.pointer import StorePointer
+from common.stores.chroma import ChromaVectorStore
+from common.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 
-from indexer.pointer import MediaPointer, StorePointer
+from indexer.pointer import MediaPointer
 from indexer.runner import run
-from indexer.stores.chroma import ChromaVectorStore
-from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 from tests.stubs.caption_model import StubCaptionModel
 
 
@@ -69,6 +70,8 @@ class TestRunIntegration:
             StubCaptionModel(),
             SentenceTransformerVectorizer(),
             ChromaVectorStore(),
+            vectorizer_name="sentence-transformer",
+            vector_store_name="chroma",
         )
         assert (store_dir / "db").is_dir()
 
@@ -79,12 +82,13 @@ class TestRunIntegration:
             StubCaptionModel(),
             SentenceTransformerVectorizer(),
             ChromaVectorStore(),
+            vectorizer_name="sentence-transformer",
+            vector_store_name="chroma",
         )
-        meta_path = store_dir / "db" / "index_meta.json"
-        assert meta_path.exists()
-        meta = json.loads(meta_path.read_text())
-        assert "indexed_at" in meta
-        assert meta["source"] == f"file://{media_dir}"
+        meta = IndexMeta.load(store_dir / "db" / "index_meta.json")
+        assert meta.source == f"file://{media_dir}"
+        assert meta.vectorizer == "sentence-transformer"
+        assert meta.vector_store == "chroma"
 
     def test_second_run_archives_old_db(self, media_dir, store_dir):
         vectorizer = SentenceTransformerVectorizer()
@@ -94,6 +98,8 @@ class TestRunIntegration:
             StubCaptionModel(),
             vectorizer,
             ChromaVectorStore(),
+            vectorizer_name="sentence-transformer",
+            vector_store_name="chroma",
         )
         run(
             _media(media_dir),
@@ -101,6 +107,8 @@ class TestRunIntegration:
             StubCaptionModel(),
             vectorizer,
             ChromaVectorStore(),
+            vectorizer_name="sentence-transformer",
+            vector_store_name="chroma",
         )
 
         # After second run, an archive db_YYYY-MM-DD should exist
