@@ -76,7 +76,7 @@ class TestIndexMetaLoad:
                 }
             )
         )
-        with pytest.raises(ValueError, match="vectorizer"):
+        with pytest.raises(ValueError, match="Cannot parse field"):
             IndexMeta.load(path)
 
     def test_load_raises_value_error_on_bad_json(self, tmp_path: Path) -> None:

@@ -87,11 +87,12 @@ class ChromaVectorStore(VectorStore):
         # but before a post-move write would leave a valid DB with no timestamp.
         tmp_dir = self._tmp_dir
         self._tmp_dir = None
-        meta = {"created_at": datetime.now(UTC).isoformat()}
-        (tmp_dir / _META_FILE).write_text(json.dumps(meta))
-        # PersistentClient auto-persists on write; just move the directory.
-        # Clean up the temp dir on failure so it is never orphaned under /tmp.
+        # Write sidecar and move are inside the same try block so a write_text
+        # failure also triggers cleanup of the orphaned temp directory.
         try:
+            meta = {"created_at": datetime.now(UTC).isoformat()}
+            (tmp_dir / _META_FILE).write_text(json.dumps(meta))
+            # PersistentClient auto-persists on write; just move the directory.
             if local_path.exists():
                 shutil.rmtree(local_path)
             shutil.move(str(tmp_dir), str(local_path))

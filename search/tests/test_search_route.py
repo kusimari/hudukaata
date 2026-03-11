@@ -1,4 +1,4 @@
-"""Tests for the /search and /healthz endpoints."""
+"""Tests for the /search, /healthz, and /readyz endpoints."""
 
 from __future__ import annotations
 
@@ -95,3 +95,17 @@ class TestSearchEndpoint:
     def test_whitespace_only_query_returns_422(self, client: TestClient) -> None:
         resp = client.get("/search?q=   ")
         assert resp.status_code == 422
+
+
+class TestReadyz:
+    def test_returns_200_when_index_loaded(self, client: TestClient) -> None:
+        resp = client.get("/readyz")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ready"}
+
+    def test_returns_503_when_index_not_loaded(self) -> None:
+        """Readiness probe must return 503 before load() completes."""
+        app.state.ctx = None
+        c = TestClient(app, raise_server_exceptions=False)
+        resp = c.get("/readyz")
+        assert resp.status_code == 503

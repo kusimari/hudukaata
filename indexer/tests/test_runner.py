@@ -70,6 +70,8 @@ class TestRunIntegration:
             StubCaptionModel(),
             SentenceTransformerVectorizer(),
             ChromaVectorStore(),
+            vectorizer_name="sentence-transformer",
+            vector_store_name="chroma",
         )
         assert (store_dir / "db").is_dir()
 
@@ -96,6 +98,8 @@ class TestRunIntegration:
             StubCaptionModel(),
             vectorizer,
             ChromaVectorStore(),
+            vectorizer_name="sentence-transformer",
+            vector_store_name="chroma",
         )
         run(
             _media(media_dir),
@@ -103,6 +107,8 @@ class TestRunIntegration:
             StubCaptionModel(),
             vectorizer,
             ChromaVectorStore(),
+            vectorizer_name="sentence-transformer",
+            vector_store_name="chroma",
         )
 
         # After second run, an archive db_YYYY-MM-DD should exist
