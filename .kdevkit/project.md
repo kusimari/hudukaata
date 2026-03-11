@@ -33,12 +33,31 @@ hudukaata/
 ## Dev Environments
 
 Each sub-package has a named Nix devShell in `flake.nix` at the repo root.
-Before starting a coding session on a sub-package, enter its shell:
+The shell provides system tools (ffmpeg, rclone) and auto-installs Python
+dependencies.
+
+### Auto-activation (recommended)
+
+The repo ships an `.envrc` that auto-activates the shell via direnv:
+
+```bash
+# one-time per machine
+nix profile install nixpkgs#direnv nixpkgs#nix-direnv
+
+# one-time per clone
+direnv allow
+
+# add to ~/.bashrc or ~/.zshrc (if not already present)
+eval "$(direnv hook bash)"   # or: eval "$(direnv hook zsh)"
+```
+
+After setup, `cd`-ing into the repo (or any subdirectory) is enough — no
+manual invocation needed.
+
+### Manual activation (fallback)
 
 | Package   | Command                  |
 |-----------|--------------------------|
 | indexer   | `nix develop .#indexer`  |
 
-The shell provides system tools (ffmpeg, rclone) and installs Python
-dependencies automatically. Run all linting, type checking, and tests from
-within the shell.
+Run all linting, type checking, and tests from within the activated environment.

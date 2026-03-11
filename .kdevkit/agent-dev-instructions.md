@@ -17,7 +17,9 @@ hudukaata/
 
 ## Local commands
 
-Run all commands from `indexer/` after `pip install -e ".[dev]"` (first time only).
+Run all commands from `indexer/` inside the dev environment. The repo uses
+direnv + nix-direnv: the environment activates automatically on `cd` if direnv
+is installed. Otherwise enter it manually with `nix develop .#indexer`.
 
 ```bash
 # Lint
