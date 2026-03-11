@@ -45,7 +45,6 @@ def resolve_instance(
 
     if not (isinstance(cls, type) and issubclass(cls, expected_type)):
         raise ValueError(
-            f"{kind} {name!r} must be a subclass of {expected_type.__name__}, "
-            f"got {cls!r}"
+            f"{kind} {name!r} must be a subclass of {expected_type.__name__}, got {cls!r}"
         )
     return cls()
