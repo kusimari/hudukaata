@@ -32,8 +32,17 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: setup env
-        run: nix develop .#indexer --command bash -c "echo env ready"
+      - uses: cachix/cachix-action@v15
+        with:
+          name: hudukaata
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
 
       - name: lint and test
         run: nix develop .#indexer --command bash -c "cd indexer && ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/indexer && python -m pytest tests/ -v"
