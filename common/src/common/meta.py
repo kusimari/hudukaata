@@ -42,8 +42,8 @@ class IndexMeta:
                 vectorizer=data["vectorizer"],
                 vector_store=data["vector_store"],
             )
-        except KeyError as exc:
-            raise ValueError(f"Missing field {exc} in {path}") from exc
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"Cannot parse field {exc} in {path}") from exc
 
     def save(self, path: Path) -> None:
         """Write to a JSON file, creating parent directories as needed."""

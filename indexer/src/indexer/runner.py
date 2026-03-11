@@ -28,8 +28,8 @@ def run(
     caption_model: CaptionModel,
     vectorizer: Vectorizer,
     vector_store: VectorStore,
-    vectorizer_name: str = "sentence-transformer",
-    vector_store_name: str = "chroma",
+    vectorizer_name: str,
+    vector_store_name: str,
 ) -> None:
     """Index all media files and write them to the vector store."""
     cleanup_stale_tmp(store)

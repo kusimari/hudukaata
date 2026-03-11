@@ -8,10 +8,9 @@ from typing import Any
 import click
 from common.plugins import resolve_instance
 from common.pointer import StorePointer
+from common.registry import VECTOR_STORES, VECTORIZERS
 from common.stores.base import VectorStore
-from common.stores.chroma import ChromaVectorStore
 from common.vectorizers.base import Vectorizer
-from common.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 
 from indexer.models.base import CaptionModel
 from indexer.models.blip2 import Blip2CaptionModel
@@ -20,12 +19,6 @@ from indexer.runner import run
 
 _CAPTION_MODELS: dict[str, type[Any]] = {
     "blip2": Blip2CaptionModel,
-}
-_VECTORIZERS: dict[str, type[Any]] = {
-    "sentence-transformer": SentenceTransformerVectorizer,
-}
-_VECTOR_STORES: dict[str, type[Any]] = {
-    "chroma": ChromaVectorStore,
 }
 
 
@@ -82,10 +75,10 @@ def index(
             caption_model_name, _CAPTION_MODELS, "caption-model", CaptionModel
         )
         vectorizer: Vectorizer = resolve_instance(
-            vectorizer_name, _VECTORIZERS, "vectorizer", Vectorizer
+            vectorizer_name, VECTORIZERS, "vectorizer", Vectorizer
         )
         vector_store: VectorStore = resolve_instance(
-            vector_store_name, _VECTOR_STORES, "vector-store", VectorStore
+            vector_store_name, VECTOR_STORES, "vector-store", VectorStore
         )
     except ValueError as exc:
         raise click.BadParameter(str(exc)) from exc

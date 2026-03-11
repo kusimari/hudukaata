@@ -154,19 +154,25 @@ class Blip2CaptionModel(CaptionModel):
                     capture_output=True,
                     check=True,
                 )
-                if tmp.stat().st_size > 0:
-                    frame_paths.append(tmp)
-                else:
-                    tmp.unlink(missing_ok=True)
-                    logger.debug(
-                        "ffmpeg wrote empty frame at offset %.2f from %s; skipping", offset, path
-                    )
+                frame_paths.extend(Blip2CaptionModel._filter_frame_files([tmp]))
             except Exception as exc:
                 tmp.unlink(missing_ok=True)
                 logger.warning(
                     "Failed to extract frame at offset %.2f from %s: %s", offset, path, exc
                 )
         return frame_paths
+
+    @staticmethod
+    def _filter_frame_files(candidates: list[Path]) -> list[Path]:
+        """Return only non-empty files from *candidates*; delete the empty ones."""
+        valid: list[Path] = []
+        for p in candidates:
+            if p.exists() and p.stat().st_size > 0:
+                valid.append(p)
+            else:
+                p.unlink(missing_ok=True)
+                logger.debug("ffmpeg wrote empty frame %s; skipping", p)
+        return valid
 
     def _transcribe_audio(self, path: Path) -> str:
         self._load_whisper()

@@ -34,7 +34,7 @@ class ChromaVectorStore(VectorStore):
             path=str(local_path),
             settings=Settings(anonymized_telemetry=False),
         )
-        self._collection = self._client.get_or_create_collection(self.collection_name)
+        self._collection = self._client.get_collection(self.collection_name)
 
     def create_empty(self) -> None:
         import chromadb
@@ -77,17 +77,20 @@ class ChromaVectorStore(VectorStore):
                 "save() requires the store to have been initialised via create_empty(). "
                 "load() is for read queries only and does not support re-saving."
             )
-        if self._client is None:
-            raise RuntimeError("Store not initialised; call create_empty() first")
         # Release client/collection handles before moving the directory.
         # ChromaDB's PersistentClient may hold open file handles; closing them
         # first avoids failures on Windows and certain Linux configurations.
         self._client = None
         self._collection = None
-        # PersistentClient auto-persists on write; just move the directory.
-        # Clean up the temp dir on failure so it is never orphaned under /tmp.
+        # Write sidecar into the temp dir BEFORE the move so it travels
+        # atomically with the rest of the DB contents.  A crash after the move
+        # but before a post-move write would leave a valid DB with no timestamp.
         tmp_dir = self._tmp_dir
         self._tmp_dir = None
+        meta = {"created_at": datetime.now(UTC).isoformat()}
+        (tmp_dir / _META_FILE).write_text(json.dumps(meta))
+        # PersistentClient auto-persists on write; just move the directory.
+        # Clean up the temp dir on failure so it is never orphaned under /tmp.
         try:
             if local_path.exists():
                 shutil.rmtree(local_path)
@@ -95,10 +98,6 @@ class ChromaVectorStore(VectorStore):
         except Exception:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
-
-        # Write sidecar metadata
-        meta = {"created_at": datetime.now(UTC).isoformat()}
-        (local_path / _META_FILE).write_text(json.dumps(meta))
 
     def query(
         self,
@@ -125,5 +124,5 @@ class ChromaVectorStore(VectorStore):
         try:
             data = json.loads(meta_path.read_text())
             return datetime.fromisoformat(data["created_at"])
-        except Exception:
+        except (json.JSONDecodeError, KeyError, ValueError):
             return None

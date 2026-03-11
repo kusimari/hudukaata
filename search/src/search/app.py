@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -19,7 +20,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = Settings()
-    app.state.ctx = load(settings)
+    try:
+        app.state.ctx = load(settings)
+    except Exception:
+        logger.error("Failed to load index at startup", exc_info=True)
+        raise
     yield
     # Clean up rclone-downloaded DB directory on shutdown.
     ctx: AppState = app.state.ctx
@@ -63,7 +68,7 @@ def _get_ctx() -> AppState:
 
 
 @app.get("/search", response_model=list[SearchResult])
-def search(
+async def search(
     q: str = Query(..., description="Search query string."),
     n: int | None = Query(default=None, description="Number of results (overrides default)."),
 ) -> list[SearchResult]:
@@ -71,12 +76,19 @@ def search(
     ctx = _get_ctx()
     if not q.strip():
         raise HTTPException(status_code=422, detail="Query string 'q' must not be empty.")
-    vector = ctx.vectorizer.vectorize(q)
+    vector = await asyncio.to_thread(ctx.vectorizer.vectorize, q)
     raw_results = ctx.vector_store.query(vector, n_results=n if n is not None else ctx.top_k)
     return [_to_result(r) for r in raw_results]
 
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
-    """Liveness probe — returns 200 when the server is ready."""
+    """Liveness probe — always returns 200 when the process is alive."""
     return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz() -> dict[str, str]:
+    """Readiness probe — returns 503 until the index is loaded."""
+    _get_ctx()
+    return {"status": "ready"}

@@ -170,7 +170,7 @@ class StorePointer(_BasePointer):
             )
             entries = json.loads(result.stdout or "[]")
             return any(e.get("Name") == name and e.get("IsDir") for e in entries)
-        except Exception:
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
             return False
 
     def rename_dir(self, old: str, new: str) -> None:
