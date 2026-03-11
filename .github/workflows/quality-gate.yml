@@ -8,8 +8,7 @@
 #   [x] Require status checks to pass before merging
 #       [x] Require branches to be up to date before merging
 #       Status checks to add:
-#         - lint
-#         - test
+#         - build
 #   [x] Do not allow bypassing the above settings
 #   [ ] Allow auto-merge — leave OFF (human reviewer decides)
 
@@ -21,8 +20,8 @@ on:
       - main
 
 jobs:
-  lint:
-    name: lint
+  build:
+    name: build
     runs-on: ubuntu-latest
 
     steps:
@@ -36,37 +35,13 @@ jobs:
       - name: setup env
         run: nix develop .#indexer --command bash -c "echo env ready"
 
-      - name: ruff lint
-        run: nix develop .#indexer --command bash -c "cd indexer && ruff check src/ tests/"
-
-      - name: ruff format check
-        run: nix develop .#indexer --command bash -c "cd indexer && ruff format --check src/ tests/"
-
-      - name: mypy
-        run: nix develop .#indexer --command bash -c "cd indexer && python -m mypy src/indexer"
-
-  test:
-    name: test
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: cachix/install-nix-action@v27
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: setup env
-        run: nix develop .#indexer --command bash -c "echo env ready"
-
-      - name: pytest
-        run: nix develop .#indexer --command bash -c "cd indexer && python -m pytest tests/ -v"
+      - name: lint and test
+        run: nix develop .#indexer --command bash -c "cd indexer && ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/indexer && python -m pytest tests/ -v"
 
   comment-on-failure:
     name: comment-on-failure
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [build]
     if: failure() && github.event_name == 'pull_request'
     permissions:
       pull-requests: write
@@ -76,20 +51,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const lintResult = '${{ needs.lint.result }}';
-            const testResult = '${{ needs.test.result }}';
-            const lines = ['## Quality Gate Failed'];
-            if (lintResult !== 'success') {
-              lines.push('- **lint** job failed — check ruff/mypy output in the Actions tab.');
-            }
-            if (testResult !== 'success') {
-              lines.push('- **test** job failed — check pytest output in the Actions tab.');
-            }
-            lines.push('');
-            lines.push('Fix the issues and push a new commit to re-run the checks.');
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: lines.join('\n'),
+              body: [
+                '## Quality Gate Failed',
+                '- **build** job failed — check ruff/mypy/pytest output in the Actions tab.',
+                '',
+                'Fix the issues and push a new commit to re-run the checks.',
+              ].join('\n'),
             });
