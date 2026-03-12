@@ -1,0 +1,65 @@
+# integration-test.yml
+#
+# Full end-to-end integration test: indexes sample images, starts the search
+# API and webapp, and verifies search returns results.
+#
+# Trigger: manual only (workflow_dispatch).
+# This test is NOT required for PRs or merges — run it to validate a release
+# or after changes to runner-scripts/.
+#
+# First run: downloads BLIP-2 (~4 GB) and sentence-transformer (~100 MB).
+# Subsequent runs: model weights are restored from the GitHub Actions cache,
+# so the test runs in a few minutes rather than tens of minutes.
+#
+# Required secret: CACHIX_AUTH_TOKEN (same as quality-gate.yml)
+
+name: integration-test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: hudukaata
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      # Cache pip wheels for indexer + search (avoids redownloading packages).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-e2e-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml', 'search/pyproject.toml', 'common/pyproject.toml') }}
+          restore-keys: |
+            pip-e2e-${{ runner.os }}-
+
+      # Cache npm packages for the webapp.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-e2e-${{ runner.os }}-${{ hashFiles('webapp/package-lock.json') }}
+          restore-keys: |
+            npm-e2e-${{ runner.os }}-
+
+      # Cache HuggingFace model weights (BLIP-2 ~4 GB, sentence-transformer ~100 MB).
+      # Key is stable — models don't change between runs unless pyproject.toml changes.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml', 'common/pyproject.toml') }}
+          restore-keys: |
+            hf-models-${{ runner.os }}-
+
+      - name: run e2e test
+        run: ./runner-scripts/e2e-test/run.sh
