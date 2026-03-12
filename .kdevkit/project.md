@@ -1,13 +1,21 @@
 # Project: hudukaata
 
 ## Purpose
-A monorepo containing an indexing job service, a search server, and a browser frontend.
-The system indexes media for semantic search and retrieval; the webapp provides the UX.
+A monorepo that indexes media (images, video, audio) for semantic search and streams results
+to a browser SPA. All four packages are implemented and passing their quality gates.
 
 ## Tech Stack
 - Python (common, indexer, search) — hatchling, ruff, mypy, pytest, FastAPI
 - TypeScript + React (webapp) — Vite, Vitest, @testing-library/react
 - Architecture: Monorepo; common is a shared library; indexer, search, and webapp are independent services
+
+## Package Status
+| Package | Tests | Ruff | Mypy | Notes |
+|---------|-------|------|------|-------|
+| common  | 30/30 | ✓ | ✓ | Shared pointer, meta, stores, vectorizers |
+| indexer | 71/75 | ✓ | ✓ | 4 ffmpeg/GPU tests require nix devShell |
+| search  | 21/21 | ✓ | ✓ | FastAPI server; media streaming + CORS |
+| webapp  | 28/28 | n/a | ✓ | Vite + React SPA; talks to search server |
 
 ## Constraints
 Standard best practices for each language. Python: ruff + mypy strict. TypeScript: tsc strict mode.

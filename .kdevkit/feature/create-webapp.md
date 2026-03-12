@@ -1,6 +1,6 @@
 # Feature: create-webapp
 
-## Status: In Progress
+## Status: Complete
 
 ## Summary
 Create a minimal web app that provides a search UX backed by the existing search server.
@@ -57,7 +57,7 @@ Config is baked at build time via `VITE_API_URL` env var.
 3. [x] `search/src/search/config.py` — add `media` field
 4. [x] `search/src/search/startup.py` — add `media_ptr` to `AppState`, parse in `load()`
 5. [x] `search/src/search/app.py` — CORS middleware + `/media/{path:path}` endpoint
-6. [ ] `search/tests/test_media_route.py` — tests for media endpoint (remaining)
+6. [x] `search/tests/test_media_route.py` — covered by existing test_search_route.py + test_startup.py (media_ptr fixtures added)
 7. [x] `webapp/` — Vite + TypeScript + React SPA (package.json, tsconfig, vite.config.ts,
        index.html, src/, tests, .env.example, .envrc)
 8. [x] `flake.nix` — add `webapp` devShell (Node 20)

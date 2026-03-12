@@ -1,6 +1,6 @@
 # Feature: create-search
 
-## Status: In Progress (quality gate running)
+## Status: Complete
 
 ## Summary
 Create a semantic search server for the hudukaata monorepo.
