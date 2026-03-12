@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     All fields can be set via environment variables with the ``SEARCH_`` prefix.
     Example::
 
-        SEARCH_STORE=file:///data/mystore SEARCH_MEDIA=file:///data/media SEARCH_PORT=8080 python -m search
+        SEARCH_STORE=file:///data/mystore SEARCH_MEDIA=file:///data/media \
+        SEARCH_PORT=8080 python -m search
     """
 
     model_config = SettingsConfigDict(env_prefix="SEARCH_")
