@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from common.meta import INDEX_META_FILE
+from common.pointer import StorePointer
 
 from search.startup import AppState
 from tests.stubs.vector_store import StubVectorStore
@@ -21,6 +22,7 @@ def stub_state() -> AppState:
         vectorizer=StubVectorizer(),
         vector_store=StubVectorStore(),
         top_k=5,
+        media_ptr=StorePointer.parse("file:///media"),
     )
 
 

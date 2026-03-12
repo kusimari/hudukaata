@@ -12,7 +12,7 @@ from search.startup import AppState, load
 
 
 def _settings(store_uri: str, top_k: int = 5) -> Settings:
-    return Settings(store=store_uri, top_k=top_k)
+    return Settings(store=store_uri, media="file:///media", top_k=top_k)
 
 
 class TestLoad:

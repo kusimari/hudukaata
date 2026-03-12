@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from common.pointer import StorePointer
 from fastapi.testclient import TestClient
 
 from search.app import app
@@ -18,6 +19,7 @@ def _make_state(results: list[dict[str, Any]] | None = None, top_k: int = 5) -> 
         vectorizer=StubVectorizer(),
         vector_store=StubVectorStore(results=results),
         top_k=top_k,
+        media_ptr=StorePointer.parse("file:///media"),
     )
 
 
