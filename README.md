@@ -107,6 +107,28 @@ Each script is independent. A common setup:
 
 ---
 
+## End-to-end test
+
+`runner-scripts/e2e/run.sh` spins up all three services against a small set of sample images and verifies that indexing, search, and the webapp all work together:
+
+```bash
+./runner-scripts/e2e/run.sh
+```
+
+The first run downloads the BLIP-2 model (~4 GB). Subsequent runs reuse the nix cache and are faster.
+
+---
+
 ## Development
 
 See [.kdevkit/agent-dev-instructions.md](.kdevkit/agent-dev-instructions.md) for the per-package dev loop (setup → quality → test → push).
+
+---
+
+## Project todos
+
+- [ ] **Mobile app (React Native)** — reuse the webapp API client and search UX for iOS and Android
+- [ ] **LG WebOS app** — package the webapp as a WebOS IPK for smart TVs
+- [ ] **Thumbnails** — generate thumbnails at index time and return thumbnail URLs in search results for faster rendering
+- [ ] **Full-screen play mode** — view search results one by one sequentially (slideshow / media player) in the webapp
+- [ ] **LLM-powered search** — add an LLM layer on top of the vector RAG for conversational and reasoning-based queries
