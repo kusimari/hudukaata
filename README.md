@@ -109,10 +109,10 @@ Each script is independent. A common setup:
 
 ## End-to-end test
 
-`runner-scripts/e2e/run.sh` spins up all three services against a small set of sample images and verifies that indexing, search, and the webapp all work together:
+`runner-scripts/e2e-test/run.sh` spins up all three services against a small set of sample images and verifies that indexing, search, and the webapp all work together:
 
 ```bash
-./runner-scripts/e2e/run.sh
+./runner-scripts/e2e-test/run.sh
 ```
 
 The first run downloads the BLIP-2 model (~4 GB). Subsequent runs reuse the nix cache and are faster.
