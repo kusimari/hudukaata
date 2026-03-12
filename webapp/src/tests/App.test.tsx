@@ -15,6 +15,7 @@ vi.mock('../api', async (importOriginal) => {
 describe('App', () => {
   beforeEach(() => {
     vi.mocked(api.search).mockReset()
+    api.setApiBase('http://localhost:8080')
   })
 
   it('renders the heading and search form', () => {
@@ -22,6 +23,19 @@ describe('App', () => {
     expect(screen.getByText('hudukaata')).toBeInTheDocument()
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /search/i })).toBeInTheDocument()
+  })
+
+  it('renders the api server url input', () => {
+    render(<App />)
+    expect(screen.getByLabelText(/api server/i)).toBeInTheDocument()
+  })
+
+  it('shows an error when searching with no api url set', async () => {
+    render(<App />)
+    await userEvent.clear(screen.getByLabelText(/api server/i))
+    await userEvent.type(screen.getByRole('searchbox'), 'cats')
+    await userEvent.click(screen.getByRole('button', { name: /search/i }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/api server url/i)
   })
 
   it('calls search and renders result cards on submit', async () => {

@@ -15,7 +15,7 @@ hudukaata/
     tests/
   webapp/           # TypeScript + React SPA — browser frontend
     src/
-    src/__tests__/
+    src/tests/
   .github/
     workflows/      # quality-gate.yml (lint + test gate on PRs)
   .kdevkit/
@@ -202,5 +202,5 @@ Do **NOT** open a PR or merge — leave that for the human reviewer.
 
 - No real models, no GPU, no rclone in Python tests — use stubs/mocks only.
 - Python tests live in `<package>/tests/`.
-- TypeScript tests live in `webapp/src/__tests__/`.
+- TypeScript tests live in `webapp/src/tests/`.
 - Every new code path (branch, exception handler, edge case) should have a test.

@@ -8,8 +8,17 @@ export interface SearchResult {
   extra: Record<string, string>
 }
 
-function apiBase(): string {
-  return (import.meta.env.VITE_API_URL as string | undefined) ?? ''
+let _apiBase: string | null = null
+
+export function setApiBase(url: string): void {
+  _apiBase = url
+}
+
+export function getApiBase(): string {
+  if (_apiBase === null) {
+    _apiBase = (import.meta.env.VITE_API_URL as string | undefined) ?? ''
+  }
+  return _apiBase
 }
 
 /**
@@ -17,7 +26,7 @@ function apiBase(): string {
  * Throws if the server responds with a non-2xx status.
  */
 export async function search(q: string, n?: number): Promise<SearchResult[]> {
-  const url = new URL(`${apiBase()}/search`)
+  const url = new URL(`${getApiBase()}/search`)
   url.searchParams.set('q', q)
   if (n !== undefined) url.searchParams.set('n', String(n))
 
@@ -30,5 +39,5 @@ export async function search(q: string, n?: number): Promise<SearchResult[]> {
 
 /** Return the URL for a media file served by GET /media/{path}. */
 export function mediaUrl(relativePath: string): string {
-  return `${apiBase()}/media/${relativePath}`
+  return `${getApiBase()}/media/${relativePath}`
 }
