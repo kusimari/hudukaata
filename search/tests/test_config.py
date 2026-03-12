@@ -10,14 +10,17 @@ from search.config import Settings
 
 class TestSettings:
     def test_defaults(self) -> None:
-        s = Settings(store="file:///data/store")
+        s = Settings(store="file:///data/store", media="file:///data/media")
         assert s.store == "file:///data/store"
+        assert s.media == "file:///data/media"
         assert s.port == 8080
         assert s.top_k == 5
         assert s.log_level == "INFO"
 
     def test_custom_values(self) -> None:
-        s = Settings(store="file:///custom", port=9090, top_k=10, log_level="DEBUG")
+        s = Settings(
+            store="file:///custom", media="file:///media", port=9090, top_k=10, log_level="DEBUG"
+        )
         assert s.port == 9090
         assert s.top_k == 10
         assert s.log_level == "DEBUG"

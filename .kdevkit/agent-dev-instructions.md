@@ -4,9 +4,18 @@
 
 ```
 hudukaata/
-  indexer/          # Python package (hatchling, ruff, mypy, pytest)
-    src/indexer/    # source code
-    tests/          # pytest test suite
+  common/           # Python package — shared utilities (pointer, etc.)
+    src/common/
+    tests/
+  indexer/          # Python package — indexing jobs
+    src/indexer/
+    tests/
+  search/           # Python package — FastAPI search server
+    src/search/
+    tests/
+  webapp/           # TypeScript + React SPA — browser frontend
+    src/
+    src/tests/
   .github/
     workflows/      # quality-gate.yml (lint + test gate on PRs)
   .kdevkit/
@@ -15,35 +24,76 @@ hudukaata/
     review-prompt.md            # code-review prompt for the sub-agent
 ```
 
-## Local commands
+## Package dependency map
 
-Run all commands from `indexer/`. All tools (ruff, mypy, pytest, ffmpeg, rclone)
-are provided by the Nix devShell — they are not assumed to be installed globally.
-
-```bash
-# Lint
-ruff check src/ tests/
-
-# Format check (CI-safe, no modifications)
-ruff format --check src/ tests/
-
-# Auto-format (local development)
-ruff format src/ tests/
-
-# Type check
-python -m mypy src/indexer
-
-# Tests (use python -m pytest to ensure the correct interpreter)
-python -m pytest tests/ -v
-
-# Full local quality gate (equivalent to CI)
-ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/indexer && python -m pytest tests/ -v
 ```
+common  ←── indexer
+        ←── search
+webapp  (depends on the search server's OpenAPI contract only, not its source)
+```
+
+**Rule: run the dev loop for every package affected by a change.**
+
+| Package changed | Packages to loop |
+|---|---|
+| `common`  | `common`, `indexer`, `search` |
+| `indexer` | `indexer` |
+| `search`  | `search` |
+| `webapp`  | `webapp` |
+| `flake.nix` | all packages whose devShell changed |
+
+---
+
+## Per-package quick reference
+
+### Setup commands
+
+| Package | Command |
+|---|---|
+| `common`  | `nix develop .#common  --command bash -c "echo env ready"` |
+| `indexer` | `nix develop .#indexer --command bash -c "echo env ready"` |
+| `search`  | `nix develop .#search  --command bash -c "echo env ready"` |
+| `webapp`  | `nix develop .#webapp  --command bash -c "echo env ready"` |
+
+### Quality commands (run from the package directory)
+
+**Python packages (common / indexer / search):**
+```bash
+ruff format src/ tests/          # auto-format
+ruff check --fix src/ tests/     # auto-fix what ruff can
+ruff check src/ tests/           # must exit 0
+python -m mypy src/<package>     # must exit 0
+```
+
+**webapp:**
+```bash
+npm run typecheck                 # tsc --noEmit — must exit 0
+```
+
+### Test commands (run from the package directory)
+
+**Python packages:**
+```bash
+python -m pytest tests/ -v
+```
+
+**webapp:**
+```bash
+npm test                          # vitest run — zero failures required
+```
+
+### Build (webapp only)
+```bash
+npm run build                     # tsc --noEmit && vite build → dist/
+```
+
+---
 
 ## Mandatory workflow after every code change
 
 The loop is: **Setup → Code → Quality → Code → Test → Push**.
 
+Run this loop for **each affected package** (see dependency map above).
 Quality uses a configurable score threshold — it does not require zero findings.
 Tests require zero failures.
 
@@ -51,26 +101,27 @@ Tests require zero failures.
 
 ### Step 0 — Setup environment
 
-Run once at the start of every coding session (or after any `flake.nix` change):
+Run once at the start of every coding session (or after any `flake.nix` change),
+for each affected package:
 
 ```bash
-nix develop .#indexer --command bash -c "echo env ready"
+nix develop .#<package> --command bash -c "echo env ready"
 ```
 
-This creates `indexer/.venv`, installs all Python dependencies, and verifies
-that system tools (ffmpeg, rclone) are available. All subsequent steps assume
-this has been run. If a tool is missing or a dependency fails to install, fix
-`flake.nix` or `pyproject.toml` — do not add runtime guards in application code
-or tests.
+If a tool is missing or a dependency fails to install, fix `flake.nix` or
+`pyproject.toml` / `package.json` — do not add runtime guards in application
+code or tests.
 
 ---
 
 ### Step 1 — Quality gate
 
-1. **Ruff (binary — must be zero violations):**
+#### Python packages (common / indexer / search)
+
+1. **Ruff (binary — must be zero violations):** run from the package directory.
    ```bash
-   ruff format src/ tests/          # auto-format first
-   ruff check --fix src/ tests/     # auto-fix what ruff can
+   ruff format src/ tests/
+   ruff check --fix src/ tests/
    ruff check src/ tests/           # must exit 0 before continuing
    ```
 
@@ -95,6 +146,15 @@ or tests.
      below threshold after one fix pass, proceed anyway and note the score in the
      commit message.
 
+#### webapp
+
+1. **TypeScript (binary — must be zero errors):** run from `webapp/`.
+   ```bash
+   npm run typecheck
+   ```
+
+2. Compute diff and run the sub-agent review (same as Python step 2–5 above).
+
 ---
 
 ### Step 2 — Test gate
@@ -102,9 +162,16 @@ or tests.
 1. Read the retry limit from `.kdevkit/project.md` (`max_test_fix_attempts` field).
    Default: **2**.
 
-2. Run tests:
+2. Run tests for each affected package:
+
+   **Python packages:**
    ```bash
-   cd indexer && python -m pytest tests/ -v
+   python -m pytest tests/ -v
+   ```
+
+   **webapp:**
+   ```bash
+   npm test
    ```
 
 3. **Zero failures required.** For each failure, attempt a fix and re-run.
@@ -122,7 +189,7 @@ or tests.
 
 ### Push gate
 
-Only after both gates pass:
+Only after all affected packages pass both gates:
 ```bash
 git push -u origin <feature-branch>
 ```
@@ -133,6 +200,7 @@ Do **NOT** open a PR or merge — leave that for the human reviewer.
 
 ## Notes on testing
 
-- No real models, no GPU, no rclone in tests — use stubs/mocks only.
-- Tests live in `indexer/tests/`.
+- No real models, no GPU, no rclone in Python tests — use stubs/mocks only.
+- Python tests live in `<package>/tests/`.
+- TypeScript tests live in `webapp/src/tests/`.
 - Every new code path (branch, exception handler, edge case) should have a test.

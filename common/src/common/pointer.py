@@ -159,6 +159,34 @@ class StorePointer(_BasePointer):
             if self.scheme == "rclone":
                 shutil.rmtree(local, ignore_errors=True)
 
+    @contextmanager
+    def get_file_ctx(self, relative_path: str) -> Generator[Path, None, None]:
+        """Yield a local path to a single file at *relative_path* within this pointer's root.
+
+        For ``file://`` sources the path is returned directly — no copy, no cleanup.
+        For ``rclone:`` sources the file is downloaded to a temporary directory,
+        yielded, and the directory is removed on exit::
+
+            with pointer.get_file_ctx("photos/sunset.jpg") as local:
+                data = local.read_bytes()
+        """
+        if self.scheme == "file":
+            yield Path(self.path) / relative_path
+        else:
+            tmpdir = Path(tempfile.mkdtemp(prefix="store_file_"))
+            local = tmpdir / Path(relative_path).name
+            try:
+                self._rclone_run(
+                    [
+                        "copyto",
+                        f"{self.remote}:{self.path}/{relative_path}",
+                        str(local),
+                    ]
+                )
+                yield local
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
     def has_dir(self, name: str) -> bool:
         """Return True if a subdirectory with this name exists at the pointer location."""
         if self.scheme == "file":

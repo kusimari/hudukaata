@@ -25,6 +25,7 @@ class AppState:
     vectorizer: Vectorizer
     vector_store: VectorStore
     top_k: int
+    media_ptr: StorePointer
     # For rclone sources, holds the temp dir path that must be cleaned up on
     # shutdown (ChromaDB reads from disk throughout its lifetime, not only on
     # load(), so the directory must persist for the server's lifetime).
@@ -46,6 +47,7 @@ def load(settings: Settings) -> AppState:
     3. Read ``index_meta.json`` to discover which implementations were used.
     4. Instantiate and load the vector store from the local DB path.
     5. Instantiate the vectorizer (model loaded lazily on first query).
+    6. Parse the media URI for serving ``/media/{path}`` requests.
 
     Note on rclone sources: ``get_dir()`` is used rather than ``get_dir_ctx()``
     because ChromaDB's PersistentClient reads from the directory throughout its
@@ -84,10 +86,12 @@ def load(settings: Settings) -> AppState:
         raise
 
     vectorizer = resolve_vectorizer(meta.vectorizer)
-    logger.info("Search server ready.")
+    media_ptr = StorePointer.parse(settings.media)
+    logger.info("Search server ready. Media root: %s", settings.media)
     return AppState(
         vectorizer=vectorizer,
         vector_store=vector_store,
         top_k=settings.top_k,
+        media_ptr=media_ptr,
         _db_tmp_path=db_tmp_path,
     )

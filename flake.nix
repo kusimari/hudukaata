@@ -76,6 +76,19 @@
               echo "search env ready (rclone, python 3.11)"
             '';
           };
+
+          webapp = pkgs.mkShell {
+            name = "webapp";
+            packages = [
+              pkgs.nodejs_20     # node + npm for the React/Vite frontend
+            ];
+            shellHook = ''
+              FLAKE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+              cd "$FLAKE_ROOT/webapp"
+              npm install --prefer-offline --no-audit --no-fund
+              echo "webapp env ready ($(node --version))"
+            '';
+          };
         }
       );
     };

@@ -25,3 +25,6 @@ env/
 
 # direnv
 .direnv/
+
+# Node / webapp
+node_modules/

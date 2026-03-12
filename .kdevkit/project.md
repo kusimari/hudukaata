@@ -1,14 +1,24 @@
 # Project: hudukaata
 
 ## Purpose
-A Python monorepo containing an indexing job service and a search server. The system indexes data for fast searching and retrieval.
+A monorepo that indexes media (images, video, audio) for semantic search and streams results
+to a browser SPA. All four packages are implemented and passing their quality gates.
 
 ## Tech Stack
-- Language: Python
-- Architecture: Monorepo (indexer + search server as separate services/packages)
+- Python (common, indexer, search) — hatchling, ruff, mypy, pytest, FastAPI
+- TypeScript + React (webapp) — Vite, Vitest, @testing-library/react
+- Architecture: Monorepo; common is a shared library; indexer, search, and webapp are independent services
+
+## Package Status
+| Package | Tests | Ruff | Mypy | Notes |
+|---------|-------|------|------|-------|
+| common  | 30/30 | ✓ | ✓ | Shared pointer, meta, stores, vectorizers |
+| indexer | 71/75 | ✓ | ✓ | 4 ffmpeg/GPU tests require nix devShell |
+| search  | 21/21 | ✓ | ✓ | FastAPI server; media streaming + CORS |
+| webapp  | 28/28 | n/a | ✓ | Vite + React SPA; talks to search server |
 
 ## Constraints
-No specific constraints specified; standard Python best practices apply.
+Standard best practices for each language. Python: ruff + mypy strict. TypeScript: tsc strict mode.
 
 ## Quality Gate Settings
 
@@ -22,19 +32,21 @@ max_test_fix_attempts: 2
 # When the limit is reached the agent must stop, report the remaining
 # failures, and NOT push. The human reviewer decides what to do next.
 
-## Structure (target)
+## Structure
 ```
 hudukaata/
-  indexer/       # indexing job(s)
-  search/        # search server
+  common/        # shared Python utilities
+  indexer/       # indexing jobs (Python)
+  search/        # FastAPI search server (Python)
+  webapp/        # browser SPA (TypeScript + React)
   .kdevkit/      # dev workflow metadata
 ```
 
 ## Dev Environments
 
 `flake.nix` at the repo root is the single source of truth for all dev
-environments. Each sub-package has a named devShell that provides system tools
-(ffmpeg, rclone) and auto-installs Python dependencies via a `shellHook`.
+environments. Each sub-package has a named devShell; Python shells install
+dependencies via a `shellHook`; the webapp shell runs `npm install`.
 
 ### Desktop / laptop (direnv auto-activation)
 
@@ -50,22 +62,23 @@ echo 'eval "$(direnv hook bash)"' >> ~/.bashrc   # or zsh
 One-time per clone, per package:
 ```bash
 cd indexer && direnv allow
+cd search  && direnv allow
+cd webapp  && direnv allow
 ```
-
-After that, `cd indexer` loads the indexer environment; `cd search` (future)
-loads the search environment. No manual invocation needed.
 
 ### Cloud / CI (explicit setup step)
 
-Do not rely on direnv. Run the setup command as the first explicit step:
+Do not rely on direnv. Run the setup command for each affected package:
 ```bash
-nix develop .#indexer --command bash -c "echo env ready"
+nix develop .#<package> --command bash -c "echo env ready"
 ```
-Then run quality, lint, and test commands as subsequent steps, each wrapped in
-`nix develop .#indexer --command bash -c "..."`.
+Then run quality and test commands wrapped in the same `nix develop .#<package> --command bash -c "..."`.
 
 ### Manual activation (fallback for any context)
 
-| Package   | Command                  |
-|-----------|--------------------------|
-| indexer   | `nix develop .#indexer`  |
+| Package  | Command                   |
+|----------|---------------------------|
+| common   | `nix develop .#common`    |
+| indexer  | `nix develop .#indexer`   |
+| search   | `nix develop .#search`    |
+| webapp   | `nix develop .#webapp`    |
