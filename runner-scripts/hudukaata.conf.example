@@ -1,0 +1,40 @@
+# hudukaata — local run configuration
+# Copy this file to hudukaata.conf and fill in your paths.
+# hudukaata.conf is git-ignored so your local paths stay private.
+
+# ---------------------------------------------------------------------------
+# Required
+# ---------------------------------------------------------------------------
+
+# Where your media files live.
+# Use file:// for local paths or rclone:remote-name:///path for remote storage.
+media = file:///absolute/path/to/your/media
+
+# Where the vector index is stored.
+# Use file:// for local paths or rclone:remote-name:///path for remote storage.
+store = file:///absolute/path/to/your/store
+
+# ---------------------------------------------------------------------------
+# Indexer (optional — defaults shown)
+# ---------------------------------------------------------------------------
+
+caption_model = blip2
+vectorizer    = sentence-transformer
+vector_store  = chroma
+log_level     = INFO
+
+# ---------------------------------------------------------------------------
+# Search API (optional — defaults shown)
+# ---------------------------------------------------------------------------
+
+search_port = 8080
+
+# ---------------------------------------------------------------------------
+# Webapp (optional — defaults shown)
+# ---------------------------------------------------------------------------
+
+# The host that the browser uses to reach the search API.
+# Change this if you run the search API on a different machine.
+search_api_host = http://localhost
+
+webapp_port = 5173

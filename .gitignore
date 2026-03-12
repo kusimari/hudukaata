@@ -28,3 +28,6 @@ env/
 
 # Node / webapp
 node_modules/
+
+# Local runner config (contains machine-specific paths)
+runner-scripts/hudukaata.conf
