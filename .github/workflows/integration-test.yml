@@ -65,8 +65,5 @@ jobs:
           restore-keys: |
             hf-models-${{ runner.os }}-
 
-      - name: install lsof
-        run: sudo apt-get install -y lsof
-
-      - name: run e2e test
-        run: ./runner-scripts/e2e-test/run.sh
+      - name: run e2e tests
+        run: nix develop .#e2e --command pytest runner-scripts/e2e-test/test_e2e.py -v
