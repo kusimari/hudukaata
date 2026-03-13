@@ -11,11 +11,10 @@ from common.stores.base import VectorStore
 class StubVectorStore(VectorStore):
     def __init__(self) -> None:
         self.docs: dict[str, tuple[list[float], dict[str, str]]] = {}
-        self._loaded = False
         self._empty = False
 
     def load(self, local_path: Path) -> None:
-        self._loaded = True
+        pass
 
     def create_empty(self) -> None:
         self.docs = {}
@@ -47,8 +46,7 @@ class StubVectorStore(VectorStore):
         return None
 
     def load_for_update(self, local_path: Path) -> None:
-        """Mark as loaded for update; existing docs are preserved."""
-        self._loaded = True
+        """Existing docs are preserved; behaves like an in-place open."""
 
     def upsert(
         self,

@@ -22,7 +22,7 @@ import logging
 import tempfile
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Literal
@@ -270,11 +270,9 @@ class MediaPointer(_BasePointer):
                     raw_mtime = entry.get("ModTime")
                     if raw_mtime:
                         with contextlib.suppress(ValueError):
-                            mtime = (
-                                datetime.fromisoformat(raw_mtime.replace("Z", "+00:00"))
-                                .replace(tzinfo=UTC)
-                                .timestamp()
-                            )
+                            mtime = datetime.fromisoformat(
+                                raw_mtime.replace("Z", "+00:00")
+                            ).timestamp()
                     yield MediaFile(
                         relative_path=rel,
                         media_type=media_type,

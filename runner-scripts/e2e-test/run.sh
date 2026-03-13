@@ -84,7 +84,6 @@ stop_services() {
   echo "==> Stopping search API and webapp"
   [ -n "$SEARCH_PID" ] && kill "$SEARCH_PID" 2>/dev/null || true
   [ -n "$WEBAPP_PID" ]  && kill "$WEBAPP_PID"  2>/dev/null || true
-  sleep 2
   if command -v lsof &>/dev/null; then
     lsof -ti ":$SEARCH_PORT" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
     lsof -ti ":$WEBAPP_PORT" 2>/dev/null | xargs -r kill -9 2>/dev/null || true

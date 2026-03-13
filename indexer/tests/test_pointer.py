@@ -160,6 +160,41 @@ class TestScan:
         p = MediaPointer.parse(f"file://{tmp_path}")
         assert list(p.scan()) == []
 
+    def test_subfolder_limits_scan(self, tmp_path):
+        """scan(subfolder=...) yields only files under that subtree."""
+        (tmp_path / "root.jpg").write_bytes(b"x")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "child.png").write_bytes(b"x")
+
+        p = MediaPointer.parse(f"file://{tmp_path}")
+        files = list(p.scan(subfolder="sub"))
+
+        paths = {f.relative_path for f in files}
+        assert paths == {"sub/child.png"}
+        assert "root.jpg" not in paths
+
+    def test_subfolder_relative_path_is_relative_to_root(self, tmp_path):
+        """relative_path is always relative to the original root, not the subfolder."""
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "img.png").write_bytes(b"x")
+
+        p = MediaPointer.parse(f"file://{tmp_path}")
+        files = list(p.scan(subfolder="sub"))
+
+        assert len(files) == 1
+        assert files[0].relative_path == "sub/img.png"
+
+    def test_subfolder_nonexistent_yields_nothing(self, tmp_path, caplog):
+        """A missing subfolder logs a warning and yields no files."""
+        import logging
+
+        p = MediaPointer.parse(f"file://{tmp_path}")
+        with caplog.at_level(logging.WARNING, logger="indexer.pointer"):
+            files = list(p.scan(subfolder="does_not_exist"))
+
+        assert files == []
+        assert any("does_not_exist" in r.message for r in caplog.records)
+
 
 # ---------------------------------------------------------------------------
 # StorePointer — local filesystem operations
