@@ -30,16 +30,24 @@ CAPTION=$(cfg caption_model blip2)
 VECTORIZER=$(cfg vectorizer sentence-transformer)
 VSTORE=$(cfg vector_store chroma)
 LOG=$(cfg log_level INFO)
+FOLDER=$(cfg folder "")
+CHECKPOINT=$(cfg checkpoint_interval "")
 
 if [ -z "$MEDIA" ] || [ -z "$STORE" ]; then
   echo "ERROR: 'media' and 'store' are required in $CONF" >&2
   exit 1
 fi
 
+# Build optional extra flags.
+EXTRA=""
+[ -n "$FOLDER" ]     && EXTRA="$EXTRA --folder '$FOLDER'"
+[ -n "$CHECKPOINT" ] && EXTRA="$EXTRA --checkpoint-interval '$CHECKPOINT'"
+
 echo "==> Indexing media"
-echo "    media : $MEDIA"
-echo "    store : $STORE"
-echo "    model : $CAPTION"
+echo "    media  : $MEDIA"
+echo "    store  : $STORE"
+echo "    model  : $CAPTION"
+[ -n "$FOLDER" ] && echo "    folder : $FOLDER"
 echo ""
 
 nix develop "$REPO#indexer" --command bash -c "
@@ -50,5 +58,6 @@ nix develop "$REPO#indexer" --command bash -c "
     --caption-model '$CAPTION' \
     --vectorizer '$VECTORIZER' \
     --vector-store '$VSTORE' \
-    --log-level '$LOG'
+    --log-level '$LOG' \
+    $EXTRA
 "

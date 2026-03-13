@@ -10,6 +10,15 @@ from pathlib import Path
 INDEX_META_FILE = "index_meta.json"
 """Filename of the index metadata sidecar written inside the DB directory."""
 
+INDEXER_VERSION = "1.0.0"
+"""Current indexer implementation version.
+
+Bump this constant whenever the captioning or vectorisation pipeline changes
+in a way that requires all existing documents to be re-indexed.  The indexer
+compares this value against the version stored in the existing DB's
+``index_meta.json``; if they differ it forces a full rebuild.
+"""
+
 
 @dataclass
 class IndexMeta:
@@ -22,6 +31,7 @@ class IndexMeta:
     source: str
     vectorizer: str
     vector_store: str
+    indexer_version: str = ""
 
     @staticmethod
     def load(path: Path) -> IndexMeta:
@@ -41,6 +51,7 @@ class IndexMeta:
                 source=data["source"],
                 vectorizer=data["vectorizer"],
                 vector_store=data["vector_store"],
+                indexer_version=data.get("indexer_version", ""),
             )
         except (KeyError, ValueError) as exc:
             raise ValueError(f"Cannot parse field {exc} in {path}") from exc
@@ -53,11 +64,17 @@ class IndexMeta:
         path.write_text(json.dumps(out, indent=2))
 
     @staticmethod
-    def now(source: str, vectorizer: str, vector_store: str) -> IndexMeta:
+    def now(
+        source: str,
+        vectorizer: str,
+        vector_store: str,
+        indexer_version: str = INDEXER_VERSION,
+    ) -> IndexMeta:
         """Construct an ``IndexMeta`` stamped with the current UTC time."""
         return IndexMeta(
             indexed_at=datetime.now(UTC),
             source=source,
             vectorizer=vectorizer,
             vector_store=vector_store,
+            indexer_version=indexer_version,
         )

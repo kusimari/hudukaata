@@ -1,8 +1,8 @@
-"""Tests for ChromaVectorStore — focus on query() edge cases."""
+"""Tests for ChromaVectorStore — query() edge cases + new update methods."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -67,3 +67,115 @@ class TestQueryClamp:
         store = ChromaVectorStore()
         with pytest.raises(RuntimeError, match="not initialised"):
             store.query(vector=[0.1], n_results=1)
+
+
+class TestUpsert:
+    def _store_with_collection(self) -> tuple[ChromaVectorStore, MagicMock]:
+        store = ChromaVectorStore()
+        store._tmp_dir = MagicMock()  # type: ignore[assignment]
+        mock_col = MagicMock()
+        store._collection = mock_col
+        return store, mock_col
+
+    def test_upsert_calls_collection_upsert(self) -> None:
+        store, mock_col = self._store_with_collection()
+        store.upsert("id1", [0.1, 0.2], {"caption": "sky"})
+        mock_col.upsert.assert_called_once_with(
+            ids=["id1"],
+            embeddings=[[0.1, 0.2]],
+            metadatas=[{"caption": "sky"}],
+        )
+
+    def test_upsert_updates_cache_if_primed(self) -> None:
+        store, mock_col = self._store_with_collection()
+        # Prime the cache manually.
+        store._meta_cache = {"old": {"caption": "old"}}
+        store.upsert("new_id", [0.5], {"caption": "new"})
+        assert store._meta_cache["new_id"] == {"caption": "new"}
+
+    def test_upsert_raises_when_not_initialised(self) -> None:
+        store = ChromaVectorStore()
+        with pytest.raises(RuntimeError, match="not initialised"):
+            store.upsert("x", [0.1], {})
+
+
+class TestGetMetadata:
+    def _store_with_docs(self, docs: dict[str, dict[str, str]]) -> ChromaVectorStore:
+        store = ChromaVectorStore()
+        mock_col = MagicMock()
+        ids = list(docs.keys())
+        metadatas = [docs[i] for i in ids]
+        mock_col.get.return_value = {"ids": ids, "metadatas": metadatas}
+        store._collection = mock_col
+        return store
+
+    def test_returns_none_for_missing_id(self) -> None:
+        store = self._store_with_docs({})
+        assert store.get_metadata("nonexistent") is None
+
+    def test_returns_correct_metadata(self) -> None:
+        store = self._store_with_docs({"img.jpg": {"caption": "a cat"}})
+        result = store.get_metadata("img.jpg")
+        assert result == {"caption": "a cat"}
+
+    def test_cache_primed_on_first_call_only(self) -> None:
+        store = self._store_with_docs({"x.png": {"caption": "x"}})
+        # Two calls — collection.get() must be invoked exactly once.
+        store.get_metadata("x.png")
+        store.get_metadata("x.png")
+        assert store._collection.get.call_count == 1
+
+    def test_raises_when_not_initialised(self) -> None:
+        store = ChromaVectorStore()
+        with pytest.raises(RuntimeError, match="not initialised"):
+            store.get_metadata("x")
+
+
+class TestCheckpoint:
+    def test_checkpoint_copies_tmp_dir(self, tmp_path: MagicMock) -> None:
+        store = ChromaVectorStore()
+        src = MagicMock(spec=["__str__", "exists"])
+        store._tmp_dir = src  # type: ignore[assignment]
+        dest = tmp_path / "ckpt"
+        with patch("common.stores.chroma.shutil.copytree") as mock_copy:
+            store.checkpoint(dest)
+        mock_copy.assert_called_once_with(str(src), str(dest))
+
+    def test_checkpoint_removes_existing_dest(self, tmp_path: MagicMock) -> None:
+        store = ChromaVectorStore()
+        store._tmp_dir = MagicMock()  # type: ignore[assignment]
+        dest = tmp_path / "ckpt"
+        dest.mkdir()
+        with (
+            patch("common.stores.chroma.shutil.copytree"),
+            patch("common.stores.chroma.shutil.rmtree") as mock_rm,
+        ):
+            store.checkpoint(dest)
+        mock_rm.assert_called_once_with(dest)
+
+    def test_checkpoint_raises_when_not_initialised(self, tmp_path: MagicMock) -> None:
+        store = ChromaVectorStore()
+        with pytest.raises(RuntimeError, match="checkpoint"):
+            store.checkpoint(tmp_path / "ckpt")
+
+
+class TestSavePreservesCreatedAt:
+    def test_save_uses_created_at_when_set(self, tmp_path: MagicMock) -> None:
+        from datetime import UTC, datetime
+
+        store = ChromaVectorStore()
+        fixed_ts = datetime(2024, 1, 15, tzinfo=UTC)
+        store._created_at = fixed_ts
+        fake_tmp = tmp_path / "fake_tmp"
+        fake_tmp.mkdir()
+        store._tmp_dir = fake_tmp
+        store._client = None
+        store._collection = None
+        dest = tmp_path / "db_out"
+        store.save(dest)
+        import json
+
+        from common.stores.chroma import _META_FILE
+
+        data = json.loads((dest / _META_FILE).read_text())
+        assert data["created_at"] == fixed_ts.isoformat()

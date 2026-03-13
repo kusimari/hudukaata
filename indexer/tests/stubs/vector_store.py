@@ -45,3 +45,22 @@ class StubVectorStore(VectorStore):
 
     def created_at(self, local_path: Path) -> datetime | None:
         return None
+
+    def load_for_update(self, local_path: Path) -> None:
+        """Mark as loaded for update; existing docs are preserved."""
+        self._loaded = True
+
+    def upsert(
+        self,
+        id: str,
+        vector: list[float],
+        metadata: dict[str, str],
+    ) -> None:
+        self.docs[id] = (vector, metadata)
+
+    def get_metadata(self, id: str) -> dict[str, str] | None:
+        entry = self.docs.get(id)
+        return entry[1] if entry is not None else None
+
+    def checkpoint(self, local_path: Path) -> None:
+        local_path.mkdir(parents=True, exist_ok=True)

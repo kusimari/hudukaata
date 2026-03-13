@@ -26,6 +26,18 @@ class TestCleanupStaleTmp:
         cleanup_stale_tmp(_store(tmp_path))
         assert not (tmp_path / "db_new").exists()
 
+    def test_removes_db_checkpoint(self, tmp_path):
+        (tmp_path / "db_checkpoint").mkdir()
+        cleanup_stale_tmp(_store(tmp_path))
+        assert not (tmp_path / "db_checkpoint").exists()
+
+    def test_removes_both_stale_dirs(self, tmp_path):
+        (tmp_path / "db_new").mkdir()
+        (tmp_path / "db_checkpoint").mkdir()
+        cleanup_stale_tmp(_store(tmp_path))
+        assert not (tmp_path / "db_new").exists()
+        assert not (tmp_path / "db_checkpoint").exists()
+
     def test_noop_when_no_stale_dir(self, tmp_path):
         cleanup_stale_tmp(_store(tmp_path))  # should not raise
 

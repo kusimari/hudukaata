@@ -17,9 +17,12 @@ remotes never exhaust local disk.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import tempfile
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Literal
@@ -28,6 +31,8 @@ from typing import Literal
 # that imported StorePointer from indexer.pointer continue to work.
 from common.pointer import StorePointer as StorePointer
 from common.pointer import _BasePointer
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Media type constants
@@ -98,10 +103,13 @@ class MediaFile:
         relative_path: str,
         media_type: Literal["image", "video", "audio"],
         _ctx: AbstractContextManager[Path],
+        mtime: float | None = None,
     ) -> None:
         self.relative_path = relative_path
         self.media_type = media_type
         self._ctx = _ctx
+        self.mtime = mtime
+        """UTC modification timestamp (seconds since epoch), or ``None`` if unavailable."""
         self._local: Path | None = None
 
     @property
@@ -129,7 +137,9 @@ class MediaFile:
 
     def __repr__(self) -> str:
         state = "open" if self._local is not None else "closed"
-        return f"MediaFile({self.relative_path!r}, {self.media_type!r}, {state})"
+        return (
+            f"MediaFile({self.relative_path!r}, {self.media_type!r}, mtime={self.mtime}, {state})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +200,16 @@ class _RcloneFile:
 class MediaPointer(_BasePointer):
     """Pointer to a media source directory.  Supports read-only iteration via scan()."""
 
-    def scan(self) -> Iterator[MediaFile]:
+    def scan(self, subfolder: str | None = None) -> Iterator[MediaFile]:
         """Yield a :class:`MediaFile` for every recognised media file under this pointer.
+
+        Args:
+            subfolder: Optional path relative to this pointer's root.  When
+                given, only files under that subfolder are yielded.
+                ``relative_path`` on each :class:`MediaFile` is still relative
+                to the *original* root (e.g. ``"2024/vacation.jpg"``), not to
+                the subfolder itself, so paths are consistent across runs that
+                target different subfolders of the same store.
 
         Each :class:`MediaFile` is a context manager.  Use it with ``with``::
 
@@ -207,7 +225,13 @@ class MediaPointer(_BasePointer):
         """
         if self.scheme == "file":
             root = Path(self.path)
-            for p in sorted(root.rglob("*")):
+            scan_root = root / subfolder if subfolder else root
+            if not scan_root.is_dir():
+                logger.warning(
+                    "Subfolder %r does not exist under %s — nothing to scan.", subfolder, root
+                )
+                return
+            for p in sorted(scan_root.rglob("*")):
                 if p.is_file():
                     ext = p.suffix.lower()
                     media_type = _EXT_TO_TYPE.get(ext)
@@ -217,20 +241,43 @@ class MediaPointer(_BasePointer):
                         relative_path=str(p.relative_to(root)),
                         media_type=media_type,
                         _ctx=_LocalFile(p),
+                        mtime=p.stat().st_mtime,
                     )
         else:
+            # For rclone, concatenate the subfolder into the remote path so
+            # the lsjson call only retrieves the targeted subtree.
+            if subfolder:
+                sub_path = f"{self.path}/{subfolder.strip('/')}"
+                prefix = subfolder.strip("/") + "/"
+            else:
+                sub_path = self.path
+                prefix = ""
+            # Build a temporary pointer aimed at sub_path to reuse _rclone_lsjson.
+            sub_pointer = self.__class__(scheme="rclone", remote=self.remote, path=sub_path)
             with tempfile.TemporaryDirectory(prefix="indexer_scan_") as tmpdir_str:
                 tmpdir = Path(tmpdir_str)
-                for entry in self._rclone_lsjson():
+                for entry in sub_pointer._rclone_lsjson():
                     if entry.get("IsDir"):
                         continue
-                    rel = entry["Path"]
+                    # entry["Path"] is relative to sub_path; prepend the
+                    # subfolder prefix to make it relative to the original root.
+                    rel = prefix + entry["Path"] if prefix else entry["Path"]
                     ext = Path(rel).suffix.lower()
                     media_type = _EXT_TO_TYPE.get(ext)
                     if media_type is None:
                         continue
+                    mtime: float | None = None
+                    raw_mtime = entry.get("ModTime")
+                    if raw_mtime:
+                        with contextlib.suppress(ValueError):
+                            mtime = (
+                                datetime.fromisoformat(raw_mtime.replace("Z", "+00:00"))
+                                .replace(tzinfo=UTC)
+                                .timestamp()
+                            )
                     yield MediaFile(
                         relative_path=rel,
                         media_type=media_type,
                         _ctx=_RcloneFile(self, rel, tmpdir),
+                        mtime=mtime,
                     )
