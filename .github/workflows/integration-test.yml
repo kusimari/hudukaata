@@ -3,15 +3,12 @@
 # Full end-to-end integration test: indexes sample images, starts the search
 # API and webapp, and verifies search returns results.
 #
-# Trigger: merge queue (fires once when a PR is queued to merge into main),
-# and manual dispatch.
+# Trigger: manual dispatch only. Run this before merging significant changes,
+# or let the future release branch CI run it automatically.
 #
-# GitHub setup required:
-#   Settings → Branches → main:
-#     [x] Require merge queue
-#     Under "Required status checks before merging" in the merge queue settings:
-#       - all-green   (from quality-gate.yml)
-#       - e2e         (this workflow)
+# Future plan: add a `release` branch that main is pushed into; require this
+# workflow as a status check there. That gives a full integration gate without
+# slowing down every PR.
 #
 # First run: downloads BLIP-2 (~4 GB) and sentence-transformer (~100 MB).
 # Subsequent runs: model weights are restored from the GitHub Actions cache,
@@ -22,9 +19,6 @@
 name: integration-test
 
 on:
-  merge_group:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
