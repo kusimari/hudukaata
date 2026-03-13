@@ -108,9 +108,14 @@ class ChromaVectorStore(VectorStore):
         """Return up to *n_results* documents closest to *vector*."""
         if self._collection is None:
             raise RuntimeError("Store not initialised; call load() or create_empty() first")
+        # ChromaDB raises an error when n_results exceeds the collection size,
+        # so clamp to the actual count.  An empty collection returns [].
+        effective_n = min(n_results, self._collection.count())
+        if effective_n == 0:
+            return []
         results = self._collection.query(
             query_embeddings=[vector],
-            n_results=n_results,
+            n_results=effective_n,
             include=["metadatas"],
         )
         return [
