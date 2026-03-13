@@ -107,7 +107,7 @@
                 python -m venv "$VENV"
               fi
               source "$VENV/bin/activate"
-              python -m pip install --quiet pytest
+              python -m pip install --quiet pytest httpx
               echo "e2e test env ready (python 3.11)"
             '';
           };
