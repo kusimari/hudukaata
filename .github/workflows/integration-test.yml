@@ -3,9 +3,9 @@
 # Full end-to-end integration test: indexes sample images, starts the search
 # API and webapp, and verifies search returns results.
 #
-# Trigger: manual only (workflow_dispatch).
-# This test is NOT required for PRs or merges — run it to validate a release
-# or after changes to runner-scripts/.
+# Trigger: pull requests targeting main, and manual dispatch.
+# Add "e2e" to GitHub Branch Protection required status checks to gate merges
+# (Settings → Branches → main → Status checks → add "e2e").
 #
 # First run: downloads BLIP-2 (~4 GB) and sentence-transformer (~100 MB).
 # Subsequent runs: model weights are restored from the GitHub Actions cache,
@@ -16,12 +16,16 @@
 name: integration-test
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   e2e:
     name: e2e
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +64,9 @@ jobs:
           key: hf-models-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml', 'common/pyproject.toml') }}
           restore-keys: |
             hf-models-${{ runner.os }}-
+
+      - name: install lsof
+        run: sudo apt-get install -y lsof
 
       - name: run e2e test
         run: ./runner-scripts/e2e-test/run.sh
