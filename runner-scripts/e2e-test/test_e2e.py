@@ -101,17 +101,24 @@ def write_conf(path: Path, folder: str = "") -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
-def wait_until_ready(url: str, label: str, proc: subprocess.Popen, timeout: int = 300) -> None:
+def wait_until_ready(url: str, label: str, proc: subprocess.Popen, timeout: int = 3600) -> None:
+    """Poll url until it responds 200, the process exits, or timeout is reached.
+
+    A large default timeout is intentional: on first run, nix develop sets up
+    the venv and downloads model weights before the server even starts.
+    """
+    print(f"\nWaiting for {label} (up to {timeout}s)...", flush=True)
     for elapsed in range(timeout):
         try:
-            httpx.get(url, timeout=2).raise_for_status()
-            print(f"\n{label} ready ({elapsed}s)")
+            httpx.get(url, timeout=5).raise_for_status()
+            print(f"{label} ready ({elapsed}s)", flush=True)
             return
         except Exception:
             pass
         if proc.poll() is not None:
             raise RuntimeError(f"{label} exited unexpectedly after {elapsed}s")
-        print(".", end="", flush=True)
+        if elapsed > 0 and elapsed % 30 == 0:
+            print(f"  still waiting for {label} ({elapsed}s)...", flush=True)
         time.sleep(1)
     raise TimeoutError(f"{label} timed out after {timeout}s")
 
