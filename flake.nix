@@ -89,6 +89,28 @@
               echo "webapp env ready ($(node --version))"
             '';
           };
+
+          # Minimal shell for running the e2e pytest suite.
+          # The test itself only needs Python + pytest; the services it starts
+          # (index.sh, search.sh, webapp.sh) each pull in their own nix shells.
+          e2e = pkgs.mkShell {
+            name = "e2e";
+            packages = [
+              pkgs.python311
+              pkgs.stdenv.cc.cc.lib
+            ];
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              FLAKE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+              VENV="$FLAKE_ROOT/.e2e-venv"
+              if [ ! -d "$VENV" ]; then
+                python -m venv "$VENV"
+              fi
+              source "$VENV/bin/activate"
+              python -m pip install --quiet pytest httpx
+              echo "e2e test env ready (python 3.11)"
+            '';
+          };
         }
       );
     };

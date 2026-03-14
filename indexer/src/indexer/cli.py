@@ -55,6 +55,17 @@ def main() -> None:
     show_default=True,
     help="Vector store class to use.",
 )
+@click.option(
+    "--folder",
+    default=None,
+    help="Subfolder within the media source to process (enables incremental batching).",
+)
+@click.option(
+    "--checkpoint-interval",
+    default=100,
+    show_default=True,
+    help="Write a checkpoint to the store every N files processed (0 to disable).",
+)
 @click.option("--log-level", default="INFO", show_default=True, help="Logging level.")
 def index(
     media: str,
@@ -62,6 +73,8 @@ def index(
     caption_model_name: str,
     vectorizer_name: str,
     vector_store_name: str,
+    folder: str | None,
+    checkpoint_interval: int,
     log_level: str,
 ) -> None:
     """Index media files from MEDIA pointer into STORE."""
@@ -91,6 +104,8 @@ def index(
         vector_store,
         vectorizer_name=vectorizer_name,
         vector_store_name=vector_store_name,
+        folder=folder,
+        checkpoint_interval=checkpoint_interval,
     )
 
 

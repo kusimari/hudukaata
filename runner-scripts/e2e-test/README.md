@@ -1,48 +1,62 @@
 # hudukaata end-to-end test
 
-`run.sh` is a self-contained integration test that exercises the full pipeline
-from raw media files to search results returned through the webapp.
+`test_e2e.py` is a pytest integration test that exercises the full pipeline
+in two phases: an initial index of one subfolder, followed by an incremental
+update from a different subfolder.
 
 ## What it tests
 
 ```
-sample images
-    │
-    ▼
-indexer          (nix devShell — downloads caption + vectorizer models on first run)
-    │  writes ChromaDB store to a temp dir
-    ▼
-search API       (background process, port 18080)
-    │  loads the index, exposes /search /media /readyz
-    ▼
-webapp           (background process, port 15173)
-    │  Vite dev server configured with VITE_API_URL pointing at the search API
-    │  /api/* proxied → search API (strips /api prefix)
-    ▼
-assertions
-  1. GET /              → response body contains <html  (webapp is up and serving)
-  2. GET /api/search    → goes through the Vite proxy to the search API;
-                          verifies ≥ 1 result is returned for the query "blue sky"
+Phase 1 — index subdir_a/ (blue_sky.png + green_field.png)
+      |
+      v
+  indexer  --folder subdir_a
+      |  writes ChromaDB store (2 documents)
+      v
+  search API  (port 18080)
+  webapp      (port 15173)
+      |
+  assertions
+    1. GET /                       -> response body contains <html
+    2. GET /api/search?q=blue+sky  -> >= 1 result, all paths contain "subdir_a"
+                                      (folder scoping: subdir_b is not present yet)
+
+Phase 2 — incrementally index subdir_b/ (red_sunset.png, generated at runtime)
+      |
+      v
+  indexer  --folder subdir_b  (loads existing DB, adds 1 new file)
+      |  updated ChromaDB store (3 documents total)
+      v
+  search API  (restarted)
+  webapp      (restarted)
+      |
+  assertions
+    3. GET /                         -> response body contains <html
+    4. GET /api/search?q=outdoor     -> >= 3 results (both subdirs indexed)
+    5. GET /api/search?q=sunset      -> at least one path contains "subdir_b"
+                                        (confirms incremental update was applied)
+    6. GET /api/search?q=blue+sky    -> at least one path contains "subdir_a"
+                                        (confirms no data loss)
 ```
 
-The proxy approach (step 2) is deliberate: rather than calling the search API
-directly, the test hits the webapp's `/api` route.  This verifies that the
-webapp process is running *and* is correctly wired to the search API — a direct
-API call would not catch a misconfigured `VITE_API_URL`.
-
-## Why the search returns both sample images
-
-The vector store returns the top-N most similar items with **no minimum
-relevance threshold**.  With only two images in the test index and `n=5`
-requested, both images are returned — the green-field image is the *least*
-similar match to "blue sky" but still appears because there is nothing else to
-fill the result set.  The assertion intentionally checks only that *at least
-one* result is returned, which is sufficient for an existence/wiring test.
+Using two different subfolders (not just two batches of the same folder) gives
+confidence that the folder-scoping feature correctly limits what the indexer
+processes, and that the incremental update mechanism accumulates results across
+independent runs.
 
 ## Running locally
 
 ```
-./runner-scripts/e2e-test/run.sh
+pytest runner-scripts/e2e-test/test_e2e.py -v
 ```
 
-Requires: `nix` with flakes enabled.  Models are cached after the first run.
+Run this from the `e2e` nix shell:
+
+```
+nix develop .#e2e
+pytest runner-scripts/e2e-test/test_e2e.py -v
+```
+
+Requires: `nix` with flakes enabled.  Models are cached after the first run
+(`~/.cache/huggingface`).  `red_sunset.png` is generated at runtime via PIL
+inside the indexer nix shell; no binary asset is committed.

@@ -19,8 +19,15 @@ class ChromaVectorStore(VectorStore):
         self.collection_name = collection_name
         self._client: Any = None
         self._collection: Any = None
-        # Temp directory used by create_empty(); moved to final path in save().
+        # Temp directory used by create_empty() / load_for_update(); moved to
+        # final path in save().
         self._tmp_dir: Path | None = None
+        # Preserved creation timestamp from an existing DB loaded via
+        # load_for_update().  Written into db_meta.json by save() so that
+        # archive names reflect when the DB was first created, not updated.
+        self._created_at: datetime | None = None
+        # Lazy cache populated on the first get_metadata() call.
+        self._meta_cache: dict[str, dict[str, str]] | None = None
 
     # ------------------------------------------------------------------
     # VectorStore interface
@@ -35,6 +42,33 @@ class ChromaVectorStore(VectorStore):
             settings=Settings(anonymized_telemetry=False),
         )
         self._collection = self._client.get_collection(self.collection_name)
+
+    def load_for_update(self, local_path: Path) -> None:
+        """Copy *local_path* to a temp dir and open it for read-write.
+
+        The original DB at *local_path* is untouched.  After this call the
+        store behaves like it was initialised via :meth:`create_empty` and
+        supports :meth:`upsert`, :meth:`checkpoint`, and :meth:`save`.
+        """
+        import chromadb
+        from chromadb.config import Settings
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_upd_"))
+        try:
+            shutil.copytree(str(local_path), str(tmp_dir), dirs_exist_ok=True)
+            client = chromadb.PersistentClient(
+                path=str(tmp_dir),
+                settings=Settings(anonymized_telemetry=False),
+            )
+            collection = client.get_collection(self.collection_name)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        self._tmp_dir = tmp_dir
+        self._client = client
+        self._collection = collection
+        self._created_at = self.created_at(local_path)
+        self._meta_cache = None
 
     def create_empty(self) -> None:
         import chromadb
@@ -55,6 +89,8 @@ class ChromaVectorStore(VectorStore):
         self._tmp_dir = tmp_dir
         self._client = client
         self._collection = collection
+        self._created_at = None
+        self._meta_cache = None
 
     def add(
         self,
@@ -70,27 +106,75 @@ class ChromaVectorStore(VectorStore):
             metadatas=[metadata],
         )
 
+    def upsert(
+        self,
+        id: str,
+        vector: list[float],
+        metadata: dict[str, str],
+    ) -> None:
+        if self._collection is None:
+            raise RuntimeError(
+                "Store not initialised; call load_for_update() or create_empty() first"
+            )
+        self._collection.upsert(
+            ids=[id],
+            embeddings=[vector],
+            metadatas=[metadata],
+        )
+        # Invalidate cache so a subsequent get_metadata() reflects the change.
+        if self._meta_cache is not None:
+            self._meta_cache[id] = metadata
+
+    def get_metadata(self, id: str) -> dict[str, str] | None:
+        if self._collection is None:
+            raise RuntimeError(
+                "Store not initialised; call load_for_update() or create_empty() first"
+            )
+        if self._meta_cache is None:
+            result = self._collection.get(include=["metadatas"])
+            self._meta_cache = {
+                doc_id: meta
+                for doc_id, meta in zip(result["ids"], result["metadatas"], strict=True)
+            }
+        return self._meta_cache.get(id)
+
+    def checkpoint(self, local_path: Path) -> None:
+        if self._tmp_dir is None:
+            raise RuntimeError(
+                "checkpoint() requires the store to be initialised via"
+                " create_empty() or load_for_update()"
+            )
+        if local_path.exists():
+            shutil.rmtree(local_path)
+        shutil.copytree(str(self._tmp_dir), str(local_path))
+
     def save(self, local_path: Path) -> None:
         if self._tmp_dir is None:
-            # _tmp_dir is only set by create_empty(); load() does not set it.
+            # _tmp_dir is only set by create_empty() / load_for_update().
             raise RuntimeError(
-                "save() requires the store to have been initialised via create_empty(). "
-                "load() is for read queries only and does not support re-saving."
+                "save() requires the store to have been initialised via create_empty() "
+                "or load_for_update(). load() is for read queries only and does not "
+                "support re-saving."
             )
         # Release client/collection handles before moving the directory.
         # ChromaDB's PersistentClient may hold open file handles; closing them
         # first avoids failures on Windows and certain Linux configurations.
         self._client = None
         self._collection = None
+        self._meta_cache = None
         # Write sidecar into the temp dir BEFORE the move so it travels
         # atomically with the rest of the DB contents.  A crash after the move
         # but before a post-move write would leave a valid DB with no timestamp.
         tmp_dir = self._tmp_dir
         self._tmp_dir = None
+        # Use the preserved creation time for update runs so that archive names
+        # reflect when the DB was first built, not when it was last updated.
+        created_ts = (self._created_at or datetime.now(UTC)).isoformat()
+        self._created_at = None
         # Write sidecar and move are inside the same try block so a write_text
         # failure also triggers cleanup of the orphaned temp directory.
         try:
-            meta = {"created_at": datetime.now(UTC).isoformat()}
+            meta = {"created_at": created_ts}
             (tmp_dir / _META_FILE).write_text(json.dumps(meta))
             # PersistentClient auto-persists on write; just move the directory.
             if local_path.exists():

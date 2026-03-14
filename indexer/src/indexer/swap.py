@@ -67,6 +67,12 @@ def commit(
 
 
 def cleanup_stale_tmp(store: StorePointer) -> None:
-    """Remove any leftover db_new from a previous aborted run."""
+    """Remove leftover temporary directories from a previous aborted run.
+
+    Cleans up both ``db_new`` (written during indexing) and ``db_checkpoint``
+    (written during checkpointing).  The live ``db`` directory is never touched.
+    """
     if store.has_dir("db_new"):
         store.delete_dir("db_new")
+    if store.has_dir("db_checkpoint"):
+        store.delete_dir("db_checkpoint")

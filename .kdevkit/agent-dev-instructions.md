@@ -204,3 +204,18 @@ Do **NOT** open a PR or merge — leave that for the human reviewer.
 - Python tests live in `<package>/tests/`.
 - TypeScript tests live in `webapp/src/tests/`.
 - Every new code path (branch, exception handler, edge case) should have a test.
+
+### Keeping stubs in sync across packages
+
+Each package has its own stub implementations of shared interfaces (e.g.
+`VectorStore`, `Vectorizer`). When you add or change an **abstract method** in
+`common/`, you **must** update the stub in every package that defines one:
+
+| Interface | Stubs to update |
+|---|---|
+| `common.stores.base.VectorStore` | `indexer/tests/stubs/vector_store.py`, `search/tests/stubs/vector_store.py` |
+| `common.stores.base.Vectorizer` | `indexer/tests/stubs/vectorizer.py`, `search/tests/stubs/vectorizer.py` (if they exist) |
+
+Failing to update all stubs causes `TypeError: Can't instantiate abstract class`
+at test collection time in the packages whose stubs are stale — a failure that
+only appears in CI because the local dev loop may skip downstream packages.

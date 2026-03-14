@@ -31,3 +31,15 @@ class StubVectorStore(VectorStore):
 
     def created_at(self, local_path: Path) -> datetime | None:
         return None
+
+    def load_for_update(self, local_path: Path) -> None:
+        pass
+
+    def upsert(self, id: str, vector: list[float], metadata: dict[str, str]) -> None:
+        pass
+
+    def get_metadata(self, id: str) -> dict[str, str] | None:
+        return None
+
+    def checkpoint(self, local_path: Path) -> None:
+        pass

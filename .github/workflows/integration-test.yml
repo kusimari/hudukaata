@@ -3,13 +3,22 @@
 # Full end-to-end integration test: indexes sample images, starts the search
 # API and webapp, and verifies search returns results.
 #
-# Trigger: manual only (workflow_dispatch).
-# This test is NOT required for PRs or merges — run it to validate a release
-# or after changes to runner-scripts/.
+# Trigger: manual dispatch only. Run this before merging significant changes,
+# or let the future release branch CI run it automatically.
 #
-# First run: downloads BLIP-2 (~4 GB) and sentence-transformer (~100 MB).
-# Subsequent runs: model weights are restored from the GitHub Actions cache,
-# so the test runs in a few minutes rather than tens of minutes.
+# Future plan: add a `release` branch that main is pushed into; require this
+# workflow as a status check there. That gives a full integration gate without
+# slowing down every PR.
+#
+# Caching layers:
+#   - Cachix binary cache       → nix derivations (python311, ffmpeg, nodejs, …)
+#   - actions/cache venvs       → installed Python venvs (torch, transformers, …)
+#   - actions/cache pip wheels  → downloaded .whl files
+#   - actions/cache hf-models   → BLIP-2 (~4 GB) + sentence-transformer (~100 MB)
+#   - actions/cache npm         → node_modules
+#
+# First run: cold nix + model download; expect 30–60 min.
+# Subsequent runs: all caches warm; expect 5–15 min.
 #
 # Required secret: CACHIX_AUTH_TOKEN (same as quality-gate.yml)
 
@@ -22,6 +31,7 @@ jobs:
   e2e:
     name: e2e
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +54,17 @@ jobs:
           restore-keys: |
             pip-e2e-${{ runner.os }}-
 
+      # Cache the installed venvs so pip install --quiet is a no-op on cache hit.
+      # Keyed per pyproject.toml so a dep change busts the cache automatically.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            indexer/.venv
+            search/.venv
+            common/.venv
+            .e2e-venv
+          key: venv-e2e-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml', 'search/pyproject.toml', 'common/pyproject.toml') }}
+
       # Cache npm packages for the webapp.
       - uses: actions/cache@v4
         with:
@@ -53,6 +74,8 @@ jobs:
             npm-e2e-${{ runner.os }}-
 
       # Cache HuggingFace model weights (BLIP-2 ~4 GB, sentence-transformer ~100 MB).
+      # Both land under ~/.cache/huggingface/hub/ — transformers and
+      # sentence-transformers>=3.0 both use the HF hub cache by default.
       # Key is stable — models don't change between runs unless pyproject.toml changes.
       - uses: actions/cache@v4
         with:
@@ -61,5 +84,5 @@ jobs:
           restore-keys: |
             hf-models-${{ runner.os }}-
 
-      - name: run e2e test
-        run: ./runner-scripts/e2e-test/run.sh
+      - name: run e2e tests
+        run: nix develop .#e2e --command pytest runner-scripts/e2e-test/test_e2e.py -v

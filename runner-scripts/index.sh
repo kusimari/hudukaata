@@ -30,6 +30,8 @@ CAPTION=$(cfg caption_model blip2)
 VECTORIZER=$(cfg vectorizer sentence-transformer)
 VSTORE=$(cfg vector_store chroma)
 LOG=$(cfg log_level INFO)
+FOLDER=$(cfg folder "")
+CHECKPOINT=$(cfg checkpoint_interval "")
 
 if [ -z "$MEDIA" ] || [ -z "$STORE" ]; then
   echo "ERROR: 'media' and 'store' are required in $CONF" >&2
@@ -37,18 +39,34 @@ if [ -z "$MEDIA" ] || [ -z "$STORE" ]; then
 fi
 
 echo "==> Indexing media"
-echo "    media : $MEDIA"
-echo "    store : $STORE"
-echo "    model : $CAPTION"
+echo "    media  : $MEDIA"
+echo "    store  : $STORE"
+echo "    model  : $CAPTION"
+[ -n "$FOLDER" ] && echo "    folder : $FOLDER"
 echo ""
 
-nix develop "$REPO#indexer" --command bash -c "
-  cd '$REPO/indexer'
+# Pass optional parameters via environment variables so that values with shell
+# metacharacters are never interpolated inside a bash -c string.
+export _IDX_MEDIA="$MEDIA"
+export _IDX_STORE="$STORE"
+export _IDX_CAPTION="$CAPTION"
+export _IDX_VECTORIZER="$VECTORIZER"
+export _IDX_VSTORE="$VSTORE"
+export _IDX_LOG="$LOG"
+export _IDX_FOLDER="$FOLDER"
+export _IDX_CHECKPOINT="$CHECKPOINT"
+
+nix develop "$REPO#indexer" --command bash -c '
+  cd "$REPO/indexer"
+  EXTRA_ARGS=()
+  [ -n "$_IDX_FOLDER" ]     && EXTRA_ARGS+=(--folder "$_IDX_FOLDER")
+  [ -n "$_IDX_CHECKPOINT" ] && EXTRA_ARGS+=(--checkpoint-interval "$_IDX_CHECKPOINT")
   indexer index \
-    --media '$MEDIA' \
-    --store '$STORE' \
-    --caption-model '$CAPTION' \
-    --vectorizer '$VECTORIZER' \
-    --vector-store '$VSTORE' \
-    --log-level '$LOG'
-"
+    --media        "$_IDX_MEDIA" \
+    --store        "$_IDX_STORE" \
+    --caption-model "$_IDX_CAPTION" \
+    --vectorizer   "$_IDX_VECTORIZER" \
+    --vector-store "$_IDX_VSTORE" \
+    --log-level    "$_IDX_LOG" \
+    "${EXTRA_ARGS[@]}"
+'

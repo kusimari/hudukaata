@@ -23,6 +23,17 @@ vectorizer    = sentence-transformer
 vector_store  = chroma
 log_level     = INFO
 
+# Restrict indexing to a subfolder of the media source.
+# When set, only files under this subfolder are scanned.  The index is updated
+# incrementally — files already indexed with an unchanged modification time are
+# skipped.  Run without this option to process everything (full scan).
+# folder = 2024/vacations
+
+# How many files to process between checkpoint writes (default: 100).
+# A checkpoint lets a killed process leave a usable partial index in the store.
+# Set to 0 to disable checkpointing.
+# checkpoint_interval = 100
+
 # ---------------------------------------------------------------------------
 # Search API (optional — defaults shown)
 # ---------------------------------------------------------------------------
