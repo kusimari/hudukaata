@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from indexer.exif import extract_exif
 from indexer.models.base import CaptionModel
-from indexer.pointer import MediaPointer
+from indexer.pointer import MediaSource
 from indexer.swap import cleanup_stale_tmp, commit, prepare_temp_dir
 from indexer.text import format_text
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def run(
-    media: MediaPointer,
+    media: MediaSource,
     store: StorePointer,
     caption_model: CaptionModel,
     vectorizer: Vectorizer,
@@ -62,7 +62,7 @@ def run(
 
 
 def _run(
-    media: MediaPointer,
+    media: MediaSource,
     store: StorePointer,
     caption_model: CaptionModel,
     vectorizer: Vectorizer,

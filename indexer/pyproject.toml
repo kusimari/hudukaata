@@ -61,5 +61,6 @@ module = [
     "exifread.*",
     "whisper.*",
     "sentence_transformers.*",
+    "google.colab.*",
 ]
 ignore_missing_imports = true
