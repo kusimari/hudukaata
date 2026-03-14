@@ -17,7 +17,9 @@ Requires: nix with flakes enabled.
 """
 
 import json
+import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -134,6 +136,7 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
         sp = subprocess.Popen(
             [str(RUNNERS / "search.sh"), str(conf)],
             stdout=search_log.open("w"), stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         procs.append(sp)
         try:
@@ -145,6 +148,7 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
         wp = subprocess.Popen(
             [str(RUNNERS / "webapp.sh"), str(conf)],
             stdout=webapp_log.open("w"), stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         procs.append(wp)
         try:
@@ -160,12 +164,19 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
 
     finally:
         for p in procs:
-            p.terminate()
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         for p in procs:
             try:
-                p.wait(timeout=10)
+                p.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                p.kill()
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                p.wait()
         time.sleep(1)  # allow ports to be released before the next start
 
 
