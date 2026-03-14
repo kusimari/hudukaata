@@ -84,5 +84,15 @@ jobs:
           restore-keys: |
             hf-models-${{ runner.os }}-
 
+      # Cache Whisper model weights (~140 MB for "base").
+      # Whisper stores models in ~/.cache/whisper (or $WHISPER_MODEL_DIR when set).
+      # Key includes blip2.py so a model-name change in the source busts the cache.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/whisper
+          key: whisper-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml', 'indexer/src/indexer/models/blip2.py') }}
+          restore-keys: |
+            whisper-${{ runner.os }}-
+
       - name: run e2e tests
         run: nix develop .#e2e --command pytest runner-scripts/e2e-test/test_e2e.py -v

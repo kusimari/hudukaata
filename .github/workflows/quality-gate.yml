@@ -84,6 +84,14 @@ jobs:
           restore-keys: |
             pip-common-${{ runner.os }}-
 
+      # Cache the venv so the shellHook stamp-file guard skips pip install on hit.
+      - uses: actions/cache@v4
+        with:
+          path: common/.venv
+          key: venv-common-${{ runner.os }}-${{ hashFiles('common/pyproject.toml') }}
+          restore-keys: |
+            venv-common-${{ runner.os }}-
+
       - name: lint and test
         run: nix develop .#common --command bash -c "cd common && ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/common && python -m pytest tests/ -v"
 
@@ -109,9 +117,16 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: pip-indexer-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml') }}
+          key: pip-indexer-${{ runner.os }}-${{ hashFiles('common/pyproject.toml', 'indexer/pyproject.toml') }}
           restore-keys: |
             pip-indexer-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: indexer/.venv
+          key: venv-indexer-${{ runner.os }}-${{ hashFiles('common/pyproject.toml', 'indexer/pyproject.toml') }}
+          restore-keys: |
+            venv-indexer-${{ runner.os }}-
 
       - name: lint and test
         run: nix develop .#indexer --command bash -c "cd indexer && ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/indexer && python -m pytest tests/ -v"
@@ -141,6 +156,13 @@ jobs:
           key: pip-search-${{ runner.os }}-${{ hashFiles('search/pyproject.toml') }}
           restore-keys: |
             pip-search-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: search/.venv
+          key: venv-search-${{ runner.os }}-${{ hashFiles('common/pyproject.toml', 'search/pyproject.toml') }}
+          restore-keys: |
+            venv-search-${{ runner.os }}-
 
       - name: lint and test
         run: nix develop .#search --command bash -c "cd search && ruff check src/ tests/ && ruff format --check src/ tests/ && python -m mypy src/search && python -m pytest tests/ -v"
