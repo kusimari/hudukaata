@@ -153,7 +153,9 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
             print("--- webapp log ---\n" + webapp_log.read_text())
             raise
 
-        with httpx.Client() as client:
+        # Use a long timeout: the first search query triggers lazy model loading
+        # (sentence-transformer) which can take 30+ seconds on a cold venv.
+        with httpx.Client(timeout=300.0) as client:
             yield client
 
     finally:
