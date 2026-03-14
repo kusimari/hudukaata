@@ -67,7 +67,8 @@ class Blip2CaptionModel(CaptionModel):
         if self._whisper is None:
             import whisper
 
-            self._whisper = whisper.load_model(self.whisper_model)
+            download_root = os.environ.get("WHISPER_MODEL_DIR") or None
+            self._whisper = whisper.load_model(self.whisper_model, download_root=download_root)
 
     # ------------------------------------------------------------------
     # Public API
