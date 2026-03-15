@@ -21,7 +21,7 @@ import contextlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from common.pointer import StorePointer
+from common.base import StorePointer
 
 # ---------------------------------------------------------------------------
 # Public API

@@ -224,7 +224,7 @@ class TestFileMediaPointerScan:
         import logging
 
         p = FileMediaPointer(path=str(tmp_path))
-        with caplog.at_level(logging.WARNING, logger="indexer.pointer"):
+        with caplog.at_level(logging.WARNING, logger="common.media"):
             files = list(p.scan(subfolder="does_not_exist"))
 
         assert files == []
@@ -243,7 +243,7 @@ class TestMediaPointerShim:
         """MediaPointer(scheme='rclone').scan() delegates to RcloneMediaPointer."""
         entries = [{"Path": "a.jpg", "IsDir": False, "ModTime": "2024-01-01T00:00:00Z"}]
         mp = MediaPointer(scheme="rclone", remote="r", path="p")
-        with patch("indexer.pointer._rclone_lsjson", return_value=entries):
+        with patch("common.media._rclone_lsjson", return_value=entries):
             files = list(mp.scan())
 
         assert len(files) == 1
@@ -289,7 +289,7 @@ class TestScan:
         import logging
 
         p = MediaPointer.parse(f"file://{tmp_path}")
-        with caplog.at_level(logging.WARNING, logger="indexer.pointer"):
+        with caplog.at_level(logging.WARNING, logger="common.media"):
             files = list(p.scan(subfolder="does_not_exist"))
 
         assert files == []
@@ -323,7 +323,7 @@ class TestRcloneMediaPointer:
             {"Path": "subdir", "IsDir": True},
         ]
         p = RcloneMediaPointer(remote="gdrive", path="photos")
-        with patch("indexer.pointer._rclone_lsjson", return_value=entries):
+        with patch("common.media._rclone_lsjson", return_value=entries):
             files = list(p.scan())
 
         assert len(files) == 1
@@ -336,7 +336,7 @@ class TestRcloneMediaPointer:
             {"Path": "img.jpg", "IsDir": False, "ModTime": "2024-01-01T00:00:00Z"},
         ]
         p = RcloneMediaPointer(remote="gdrive", path="photos")
-        with patch("indexer.pointer._rclone_lsjson", return_value=entries):
+        with patch("common.media._rclone_lsjson", return_value=entries):
             files = list(p.scan(subfolder="2024"))
 
         assert files[0].relative_path == "2024/img.jpg"
@@ -347,7 +347,7 @@ class TestRcloneMediaPointer:
             {"Path": "a.jpg", "IsDir": False, "ModTime": "2024-01-01T00:00:00Z"},
         ]
         p = RcloneMediaPointer(remote="r", path="p")
-        with patch("indexer.pointer._rclone_lsjson", return_value=entries):
+        with patch("common.media._rclone_lsjson", return_value=entries):
             files = list(p.scan())
 
         assert len(files) == 1
@@ -355,7 +355,7 @@ class TestRcloneMediaPointer:
     def test_scan_skips_unknown_extensions(self) -> None:
         entries = [{"Path": "doc.pdf", "IsDir": False, "ModTime": "2024-01-01T00:00:00Z"}]
         p = RcloneMediaPointer(remote="r", path="p")
-        with patch("indexer.pointer._rclone_lsjson", return_value=entries):
+        with patch("common.media._rclone_lsjson", return_value=entries):
             files = list(p.scan())
 
         assert files == []
@@ -363,7 +363,7 @@ class TestRcloneMediaPointer:
     def test_scan_mtime_parsed_from_iso(self) -> None:
         entries = [{"Path": "a.jpg", "IsDir": False, "ModTime": "2024-06-01T00:00:00Z"}]
         p = RcloneMediaPointer(remote="r", path="p")
-        with patch("indexer.pointer._rclone_lsjson", return_value=entries):
+        with patch("common.media._rclone_lsjson", return_value=entries):
             files = list(p.scan())
 
         assert files[0].mtime is not None
@@ -372,7 +372,7 @@ class TestRcloneMediaPointer:
     def test_scan_mtime_none_when_missing(self) -> None:
         entries = [{"Path": "a.jpg", "IsDir": False}]
         p = RcloneMediaPointer(remote="r", path="p")
-        with patch("indexer.pointer._rclone_lsjson", return_value=entries):
+        with patch("common.media._rclone_lsjson", return_value=entries):
             files = list(p.scan())
 
         assert files[0].mtime is None
@@ -485,7 +485,7 @@ class TestGoogleColabMediaPointer:
         _setup_colab_mock(monkeypatch)
         monkeypatch.setattr(GoogleColabMediaPointer, "_MOUNT_POINT", tmp_path)
 
-        with caplog.at_level(logging.WARNING, logger="indexer.pointer"):
+        with caplog.at_level(logging.WARNING, logger="common.media"):
             files = list(GoogleColabMediaPointer().scan(subfolder="missing"))
 
         assert files == []

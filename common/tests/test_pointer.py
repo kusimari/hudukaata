@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from common.pointer import StorePointer
+from common import StorePointer
 
 
 class TestParse:

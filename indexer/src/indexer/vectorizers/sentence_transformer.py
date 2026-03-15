@@ -1,10 +1,10 @@
-"""SentenceTransformer vectorizer (default implementation)."""
+"""SentenceTransformer vectorizer."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from common.vectorizers.base import Vectorizer
+from indexer.vectorizers.base import Vectorizer
 
 
 class SentenceTransformerVectorizer(Vectorizer):

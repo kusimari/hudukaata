@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from common.vectorizers.sentence_transformer import SentenceTransformerVectorizer
+
+from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
 
 
 @pytest.fixture(scope="module")

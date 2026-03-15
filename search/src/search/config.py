@@ -37,19 +37,27 @@ class Settings(BaseSettings):
     Accepted formats:
     - ``file:///absolute/path``
     - ``rclone:remote-name:///path/on/remote``
+    - ``gdrive:///optional/path``
     """
 
     port: int = 8080
     top_k: int = 5
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
-    @field_validator("store", "media")
+    @field_validator("store")
     @classmethod
-    def uri_must_be_valid(cls, v: str) -> str:
-        # Validate both URIs at startup so misconfiguration fails fast.
-        from common.pointer import StorePointer
+    def store_uri_must_be_valid(cls, v: str) -> str:
+        from common.base import StorePointer
 
         StorePointer.parse(v)  # raises ValueError on invalid URI
+        return v
+
+    @field_validator("media")
+    @classmethod
+    def media_uri_must_be_valid(cls, v: str) -> str:
+        from common.media import MediaSource
+
+        MediaSource.from_uri(v)  # raises ValueError on invalid URI
         return v
 
     @field_validator("top_k")

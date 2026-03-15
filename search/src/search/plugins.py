@@ -1,20 +1,16 @@
-"""Plugin registry — resolve vectorizer and vector-store names to instances."""
+"""Plugin registry — resolve index-store names to instances."""
 
 from __future__ import annotations
 
-from common.plugins import resolve_instance
-from common.registry import VECTOR_STORES, VECTORIZERS
-from common.stores.base import VectorStore
-from common.vectorizers.base import Vectorizer
+from common.base import resolve_instance
+from common.index import IndexStore
 
 
-def resolve_vectorizer(name: str) -> Vectorizer:
-    """Return a :class:`~common.vectorizers.base.Vectorizer` instance for *name*."""
-    result: Vectorizer = resolve_instance(name, VECTORIZERS, "vectorizer", Vectorizer)
-    return result
+def resolve_index_store(name: str) -> IndexStore:
+    """Return an :class:`~common.index.IndexStore` instance for *name*.
 
-
-def resolve_vector_store(name: str) -> VectorStore:
-    """Return a :class:`~common.stores.base.VectorStore` instance for *name*."""
-    result: VectorStore = resolve_instance(name, VECTOR_STORES, "vector-store", VectorStore)
+    *name* may be a short registry key or a dotted import path such as
+    ``"indexer.stores.chroma_caption.ChromaCaptionIndexStore"``.
+    """
+    result: IndexStore = resolve_instance(name, {}, "index-store", IndexStore)
     return result

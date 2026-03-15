@@ -5,21 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from common.pointer import StorePointer
+from common.media import FileMediaSource
 from fastapi.testclient import TestClient
 
 from search.app import app
 from search.startup import AppState
-from tests.stubs.vector_store import StubVectorStore
-from tests.stubs.vectorizer import StubVectorizer
+from tests.stubs.index_store import StubIndexStore
 
 
 def _make_state(results: list[dict[str, Any]] | None = None, top_k: int = 5) -> AppState:
     return AppState(
-        vectorizer=StubVectorizer(),
-        vector_store=StubVectorStore(results=results),
+        index_store=StubIndexStore(results=results),
         top_k=top_k,
-        media_ptr=StorePointer.parse("file:///media"),
+        media_src=FileMediaSource(path="/media"),
     )
 
 
