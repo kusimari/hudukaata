@@ -103,8 +103,13 @@ async def media(path: str) -> StreamingResponse:
     """Stream a media file from the configured media root by its relative path."""
     ctx = _get_ctx()
 
-    # Prevent path traversal: reject any path that contains '..'.
-    if ".." in Path(path).parts:
+    # Prevent path traversal: reject '..', absolute prefixes, and percent-encoded variants.
+    if (
+        ".." in Path(path).parts
+        or path.startswith("/")
+        or "%2e" in path.lower()
+        or "%2f" in path.lower()
+    ):
         raise HTTPException(status_code=400, detail="Invalid path.")
 
     def _serve() -> StreamingResponse:

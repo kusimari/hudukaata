@@ -115,10 +115,14 @@ def _run(
             existing = index_store.get_metadata(mf.relative_path)
             if existing is not None:
                 stored_mtime = existing.get("file_mtime")
+                try:
+                    stored_mtime_f: float | None = float(stored_mtime) if stored_mtime else None
+                except ValueError:
+                    stored_mtime_f = None
                 if (
-                    stored_mtime
+                    stored_mtime_f is not None
                     and mf.mtime is not None
-                    and abs(float(stored_mtime) - mf.mtime) < 1.0
+                    and abs(stored_mtime_f - mf.mtime) < 1.0
                 ):
                     logger.debug("Skipping unchanged %s", mf.relative_path)
                     continue

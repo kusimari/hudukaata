@@ -200,6 +200,83 @@ class TestVersionForcesFullReindex:
         assert "c.png" in call_tracker, "all files must be reprocessed on version mismatch"
 
 
+class TestCorruptMetaForcesFullReindex:
+    def test_corrupt_meta_calls_create_empty(self, tmp_path: Path) -> None:
+        """A corrupt index_meta.json (ValueError on load) forces a full reindex."""
+        media = _make_media_dir(tmp_path / "media", ["d.png"])
+        store_path = tmp_path / "store"
+        store_path.mkdir()
+        local_tmp = tmp_path / "work"
+        local_tmp.mkdir()
+
+        idx = StubIndexStore()
+        create_empty_calls: list[None] = []
+        original_create_empty = idx.create_empty
+
+        def tracking_create_empty() -> None:
+            create_empty_calls.append(None)
+            original_create_empty()
+
+        idx.create_empty = tracking_create_empty  # type: ignore[method-assign]
+
+        # Write a v1-format meta (missing required fields) to trigger ValueError on load.
+        db_path = store_path / "db"
+        db_path.mkdir()
+        import json
+
+        (db_path / "index_meta.json").write_text(
+            json.dumps({"vectorizer": "sentence-transformer", "vector_store": "chroma"})
+        )
+
+        caption_model = StubCaptionModel()
+        call_tracker: list[str] = []
+
+        def tracking_caption(mf):  # type: ignore[no-untyped-def]
+            call_tracker.append(mf.relative_path)
+            return mf.relative_path
+
+        caption_model.caption = tracking_caption  # type: ignore[method-assign]
+
+        _run(**_make_run_args(media, store_path, local_tmp, idx, caption_model))
+
+        assert len(create_empty_calls) >= 1, "create_empty must be called on corrupt meta"
+        assert "d.png" in call_tracker, "all files must be reprocessed on corrupt meta"
+
+
+class TestMalformedMtimeTriggersReprocess:
+    def test_malformed_mtime_causes_reprocess(self, tmp_path: Path) -> None:
+        """A non-numeric stored mtime must not crash the run; the file is reprocessed."""
+        media = _make_media_dir(tmp_path / "media", ["e.png"])
+        store_path = tmp_path / "store"
+        store_path.mkdir()
+        local_tmp = tmp_path / "work"
+        local_tmp.mkdir()
+
+        idx = StubIndexStore()
+        idx.docs["e.png"] = (
+            "old caption",
+            {"caption": "old", "relative_path": "e.png", "file_mtime": "not-a-number"},
+        )
+
+        db_path = store_path / "db"
+        db_path.mkdir()
+        _write_db_meta(db_path)
+
+        caption_model = StubCaptionModel()
+        call_tracker: list[str] = []
+        original_caption = caption_model.caption
+
+        def tracking_caption(mf):  # type: ignore[no-untyped-def]
+            call_tracker.append(mf.relative_path)
+            return original_caption(mf)
+
+        caption_model.caption = tracking_caption  # type: ignore[method-assign]
+
+        _run(**_make_run_args(media, store_path, local_tmp, idx, caption_model))
+
+        assert "e.png" in call_tracker, "file with malformed mtime must be reprocessed"
+
+
 class TestFolderScopedScan:
     def test_folder_limits_scan(self, tmp_path: Path) -> None:
         """With folder='sub', only files under media/sub/ are processed."""

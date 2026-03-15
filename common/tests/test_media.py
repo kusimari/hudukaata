@@ -139,17 +139,13 @@ class _LocalFsHarness:
         types_ = {f.media_type for f in self._src(tmp_path, monkeypatch).scan()}
         assert types_ == {"image", "video", "audio"}
 
-    def test_scan_excludes_non_media(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_scan_excludes_non_media(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / "img.jpg").write_bytes(b"x")
         (tmp_path / "readme.txt").write_bytes(b"x")
         files = list(self._src(tmp_path, monkeypatch).scan())
         assert {f.relative_path for f in files} == {"img.jpg"}
 
-    def test_scan_nested_directories(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_scan_nested_directories(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / "a").mkdir()
         (tmp_path / "a" / "b.png").write_bytes(b"x")
         files = list(self._src(tmp_path, monkeypatch).scan())

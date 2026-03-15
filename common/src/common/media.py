@@ -313,7 +313,7 @@ class MediaSource(ABC):
             return RcloneMediaSource(remote=remote, path=path)
 
         if uri.startswith("gdrive:"):
-            drive_path = uri[len("gdrive:///") :]
+            drive_path = uri[len("gdrive:") :].lstrip("/")
             return GdriveMediaSource(drive_path=drive_path)
 
         raise ValueError(f"Unsupported URI scheme: {uri!r}")
