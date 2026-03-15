@@ -108,6 +108,22 @@ class ChromaCaptionIndexStore(IndexStore):
         if self._meta_cache is not None:
             self._meta_cache[id] = metadata
 
+    def upsert_batch(
+        self,
+        ids: list[str],
+        texts: list[str],
+        metadatas: list[dict[str, str]],
+    ) -> None:
+        """Vectorise all texts in one encoder pass and write to ChromaDB in one call."""
+        if not ids:
+            return
+        col = self._require_collection()
+        vectors = self._vec.vectorize_batch(texts)
+        col.upsert(ids=ids, embeddings=vectors, metadatas=metadatas)
+        if self._meta_cache is not None:
+            for id_, meta in zip(ids, metadatas, strict=True):
+                self._meta_cache[id_] = meta
+
     # ------------------------------------------------------------------
     # IndexStore — lifecycle
     # ------------------------------------------------------------------
