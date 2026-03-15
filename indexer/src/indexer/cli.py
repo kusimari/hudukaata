@@ -57,9 +57,27 @@ def main() -> None:
 )
 @click.option(
     "--checkpoint-interval",
-    default=100,
+    default=0,
     show_default=True,
-    help="Write a checkpoint to the store every N files processed (0 to disable).",
+    help=("Write a checkpoint every N files (0 = after every batch, -1 = disabled)."),
+)
+@click.option(
+    "--initial-batch-size",
+    default=1,
+    show_default=True,
+    help="Number of files to process in the first batch.",
+)
+@click.option(
+    "--max-batch-size",
+    default=32,
+    show_default=True,
+    help="Upper bound on adaptive batch size.",
+)
+@click.option(
+    "--adaptive-batch/--no-adaptive-batch",
+    default=True,
+    show_default=True,
+    help="Grow/shrink batch size based on measured throughput and available RAM.",
 )
 @click.option("--log-level", default="INFO", show_default=True, help="Logging level.")
 def index(
@@ -69,6 +87,9 @@ def index(
     index_store_name: str,
     folder: str | None,
     checkpoint_interval: int,
+    initial_batch_size: int,
+    max_batch_size: int,
+    adaptive_batch: bool,
     log_level: str,
 ) -> None:
     """Index media files from MEDIA pointer into STORE."""
@@ -95,6 +116,9 @@ def index(
         index_store_name=index_store_name,
         folder=folder,
         checkpoint_interval=checkpoint_interval,
+        initial_batch_size=initial_batch_size,
+        max_batch_size=max_batch_size,
+        adaptive_batch=adaptive_batch,
     )
 
 

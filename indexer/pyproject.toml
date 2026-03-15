@@ -23,6 +23,8 @@ dependencies = [
     "click>=8.1",
     # progress
     "tqdm>=4.66",
+    # system memory monitoring for adaptive batching
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
@@ -64,5 +66,6 @@ module = [
     "whisper.*",
     "sentence_transformers.*",
     "google.colab.*",
+    "psutil.*",
 ]
 ignore_missing_imports = true

@@ -75,6 +75,53 @@ class Blip2CaptionModel(CaptionModel):
     # Public API
     # ------------------------------------------------------------------
 
+    def caption_batch(self, mfs: list[MediaFile]) -> list[str]:
+        """Caption a batch, using a single BLIP-2 forward pass for images.
+
+        Video and audio files are processed individually (they require
+        per-file frame extraction / Whisper transcription).
+        """
+        if not mfs:
+            return []
+
+        results: list[str] = [""] * len(mfs)
+        image_indices = [i for i, mf in enumerate(mfs) if mf.media_type == "image"]
+        other_indices = [i for i, mf in enumerate(mfs) if mf.media_type != "image"]
+
+        # True GPU batch for images
+        if image_indices:
+            try:
+                import torch
+                from PIL import Image
+
+                self._load_blip2()
+                device = self._get_device()
+                pil_images = [Image.open(mfs[i].local_path).convert("RGB") for i in image_indices]
+                torch_dtype = torch.float16 if device == "cuda" else torch.float32
+                inputs = self._processor(images=pil_images, return_tensors="pt", padding=True).to(
+                    device, torch_dtype
+                )
+                generated_ids = self._model.generate(**inputs, max_new_tokens=self.max_new_tokens)
+                captions = self._processor.batch_decode(generated_ids, skip_special_tokens=True)
+                for idx, cap in zip(image_indices, captions, strict=False):
+                    results[idx] = cap.strip()
+            except Exception as exc:
+                logger.warning("Batch image captioning failed (%s); falling back per-image", exc)
+                for i in image_indices:
+                    try:
+                        results[i] = self._caption_image(mfs[i].local_path)
+                    except Exception as inner:
+                        logger.warning("Skipping image %s: %s", mfs[i].relative_path, inner)
+
+        # Video and audio always single-file
+        for i in other_indices:
+            try:
+                results[i] = self.caption(mfs[i])
+            except Exception as exc:
+                logger.warning("Skipping %s: %s", mfs[i].relative_path, exc)
+
+        return results
+
     def caption(self, mf: MediaFile) -> str:
         if mf.media_type == "image":
             return self._caption_image(mf.local_path)
