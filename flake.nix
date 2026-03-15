@@ -45,9 +45,12 @@
               pkgs.python311
               pkgs.uv
               pkgs.stdenv.cc.cc.lib  # libstdc++.so.6 for pip-installed native extensions (numpy, etc.)
+              pkgs.python311Packages.psutil  # system memory monitoring for adaptive batching
             ];
             shellHook = ''
               export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              # Expose nix-managed psutil to the uv venv without polluting it with other nix packages.
+              export PYTHONPATH="${pkgs.python311Packages.psutil}/${pkgs.python311.sitePackages}''${PYTHONPATH:+:$PYTHONPATH}"
               FLAKE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
               VENV="$FLAKE_ROOT/indexer/.venv"
               if [ ! -d "$VENV" ]; then

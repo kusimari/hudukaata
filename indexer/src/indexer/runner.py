@@ -263,6 +263,10 @@ def _do_batch(
             logger.warning("caption_batch failed for batch: %s", exc)
             return 0
 
+        ids: list[str] = []
+        texts: list[str] = []
+        metadatas: list[dict[str, str]] = []
+
         for (mf, file_mtime), caption in zip(opened, captions, strict=False):
             try:
                 exif = extract_exif(mf)
@@ -273,10 +277,15 @@ def _do_batch(
                     "file_mtime": file_mtime,
                     **exif,
                 }
-                index_store.upsert(mf.relative_path, text, metadata)
-                indexed += 1
+                ids.append(mf.relative_path)
+                texts.append(text)
+                metadatas.append(metadata)
             except Exception as exc:
                 logger.warning("Skipping %s: %s", mf.relative_path, exc)
+
+        if ids:
+            index_store.upsert_batch(ids, texts, metadatas)
+            indexed = len(ids)
 
     return indexed
 

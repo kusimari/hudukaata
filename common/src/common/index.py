@@ -82,6 +82,20 @@ class IndexStore(ABC):
     def upsert(self, id: str, text: str, metadata: dict[str, str]) -> None:
         """Index a document, replacing it if *id* already exists."""
 
+    def upsert_batch(
+        self,
+        ids: list[str],
+        texts: list[str],
+        metadatas: list[dict[str, str]],
+    ) -> None:
+        """Index a batch of documents, replacing any that already exist.
+
+        Default implementation calls :meth:`upsert` once per item.
+        Subclasses may override for a single vectorise-and-write pass.
+        """
+        for id_, text, meta in zip(ids, texts, metadatas, strict=True):
+            self.upsert(id_, text, meta)
+
     # --- lifecycle ---
 
     @abstractmethod

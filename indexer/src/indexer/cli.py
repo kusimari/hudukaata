@@ -79,6 +79,15 @@ def main() -> None:
     show_default=True,
     help="Grow/shrink batch size based on measured throughput and available RAM.",
 )
+@click.option(
+    "--load-in-8bit/--no-load-in-8bit",
+    default=False,
+    show_default=True,
+    help=(
+        "Load BLIP-2 in 8-bit quantisation (requires bitsandbytes). "
+        "Halves VRAM with negligible quality impact."
+    ),
+)
 @click.option("--log-level", default="INFO", show_default=True, help="Logging level.")
 def index(
     media: str,
@@ -90,6 +99,7 @@ def index(
     initial_batch_size: int,
     max_batch_size: int,
     adaptive_batch: bool,
+    load_in_8bit: bool,
     log_level: str,
 ) -> None:
     """Index media files from MEDIA pointer into STORE."""
@@ -99,9 +109,13 @@ def index(
     store_ptr = StorePointer.parse(store)
 
     try:
-        caption_model: CaptionModel = resolve_instance(
-            caption_model_name, _CAPTION_MODELS, "caption-model", CaptionModel
-        )
+        # Blip2CaptionModel is constructed directly so --load-in-8bit can be forwarded.
+        if caption_model_name == "blip2":
+            caption_model: CaptionModel = Blip2CaptionModel(load_in_8bit=load_in_8bit)
+        else:
+            caption_model = resolve_instance(
+                caption_model_name, _CAPTION_MODELS, "caption-model", CaptionModel
+            )
         idx_store: IndexStore = resolve_instance(
             index_store_name, _INDEX_STORES, "index-store", IndexStore
         )

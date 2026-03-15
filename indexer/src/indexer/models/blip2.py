@@ -27,11 +27,13 @@ class Blip2CaptionModel(CaptionModel):
         whisper_model: str = "base",
         device: str | None = None,
         max_new_tokens: int = _DEFAULT_MAX_NEW_TOKENS,
+        load_in_8bit: bool = False,
     ) -> None:
         self.image_checkpoint = image_checkpoint
         self.whisper_model = whisper_model
         self.max_new_tokens = max_new_tokens
         self._device = device
+        self._load_in_8bit = load_in_8bit
         self._processor: Any = None
         self._model: Any = None
         self._whisper: Any = None
@@ -58,10 +60,19 @@ class Blip2CaptionModel(CaptionModel):
             device = self._get_device()
             # Load both atomically so a mid-load failure leaves _processor as None.
             proc = Blip2Processor.from_pretrained(self.image_checkpoint)
-            mdl = Blip2ForConditionalGeneration.from_pretrained(
-                self.image_checkpoint,
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            ).to(torch.device(device))  # type: ignore[arg-type]  # transformers _Wrapped typing bug
+            if self._load_in_8bit:
+                # 8-bit quantisation halves VRAM with negligible quality impact.
+                # Requires bitsandbytes: pip install bitsandbytes
+                mdl = Blip2ForConditionalGeneration.from_pretrained(
+                    self.image_checkpoint,
+                    load_in_8bit=True,
+                    device_map="auto",
+                )
+            else:
+                mdl = Blip2ForConditionalGeneration.from_pretrained(
+                    self.image_checkpoint,
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                ).to(torch.device(device))  # type: ignore[arg-type]  # transformers _Wrapped typing bug
             self._processor, self._model = proc, mdl
 
     def _load_whisper(self) -> None:
