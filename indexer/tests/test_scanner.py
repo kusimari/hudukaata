@@ -1,10 +1,9 @@
-"""Tests for scanner functionality — now part of MediaPointer.scan()."""
+"""Tests for scanner functionality — FileMediaSource.scan()."""
 
 from __future__ import annotations
 
 import pytest
-
-from indexer.pointer import MediaPointer
+from common.media import FileMediaSource
 
 
 @pytest.fixture()
@@ -26,8 +25,8 @@ def media_dir(tmp_path):
 class TestScan:
     def test_known_types_are_yielded(self, media_dir):
         root, _ = media_dir
-        p = MediaPointer.parse(f"file://{root}")
-        names = {mf.relative_path for mf in p.scan()}
+        src = FileMediaSource(path=str(root))
+        names = {mf.relative_path for mf in src.scan()}
         assert "photo.jpg" in names
         assert "clip.mp4" in names
         assert "song.mp3" in names
@@ -35,13 +34,13 @@ class TestScan:
 
     def test_unknown_extensions_excluded(self, media_dir):
         root, _ = media_dir
-        p = MediaPointer.parse(f"file://{root}")
-        assert all(not mf.relative_path.endswith(".txt") for mf in p.scan())
+        src = FileMediaSource(path=str(root))
+        assert all(not mf.relative_path.endswith(".txt") for mf in src.scan())
 
     def test_correct_media_types(self, media_dir):
         root, _ = media_dir
-        p = MediaPointer.parse(f"file://{root}")
-        by_name = {mf.relative_path: mf.media_type for mf in p.scan()}
+        src = FileMediaSource(path=str(root))
+        by_name = {mf.relative_path: mf.media_type for mf in src.scan()}
         assert by_name["photo.jpg"] == "image"
         assert by_name["clip.mp4"] == "video"
         assert by_name["song.mp3"] == "audio"
@@ -49,7 +48,7 @@ class TestScan:
 
     def test_local_path_exists_inside_with(self, media_dir):
         root, _ = media_dir
-        p = MediaPointer.parse(f"file://{root}")
-        for mf in p.scan():
+        src = FileMediaSource(path=str(root))
+        for mf in src.scan():
             with mf:
                 assert mf.local_path.exists()

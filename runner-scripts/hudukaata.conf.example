@@ -19,8 +19,7 @@ store = file:///absolute/path/to/your/store
 # ---------------------------------------------------------------------------
 
 caption_model = blip2
-vectorizer    = sentence-transformer
-vector_store  = chroma
+index_store   = indexer.stores.chroma_caption.ChromaCaptionIndexStore
 log_level     = INFO
 
 # Restrict indexing to a subfolder of the media source.

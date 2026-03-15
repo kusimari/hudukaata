@@ -88,10 +88,11 @@
               fi
               source "$VENV/bin/activate"
               _STAMP="$VENV/.pip-stamp"
-              _HASH="$(cat "$FLAKE_ROOT/common/pyproject.toml" "$FLAKE_ROOT/search/pyproject.toml" | sha256sum | cut -d' ' -f1)"
+              _HASH="$(cat "$FLAKE_ROOT/common/pyproject.toml" "$FLAKE_ROOT/search/pyproject.toml" "$FLAKE_ROOT/indexer/pyproject.toml" | sha256sum | cut -d' ' -f1)"
               if [ ! -f "$_STAMP" ] || [ "$(cat "$_STAMP" 2>/dev/null)" != "$_HASH" ]; then
                 uv pip install --quiet -e "$FLAKE_ROOT/common"
                 uv pip install --quiet -e "$FLAKE_ROOT/search[dev]"
+                uv pip install --quiet -e "$FLAKE_ROOT/indexer"
                 echo "$_HASH" > "$_STAMP"
               fi
               # sentence-transformers >= 3.0 respects HF_HOME for its model cache.

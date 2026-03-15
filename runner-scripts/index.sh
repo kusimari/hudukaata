@@ -27,8 +27,7 @@ cfg() {
 MEDIA=$(cfg media)
 STORE=$(cfg store)
 CAPTION=$(cfg caption_model blip2)
-VECTORIZER=$(cfg vectorizer sentence-transformer)
-VSTORE=$(cfg vector_store chroma)
+INDEX_STORE=$(cfg index_store indexer.stores.chroma_caption.ChromaCaptionIndexStore)
 LOG=$(cfg log_level INFO)
 FOLDER=$(cfg folder "")
 CHECKPOINT=$(cfg checkpoint_interval "")
@@ -50,8 +49,7 @@ echo ""
 export _IDX_MEDIA="$MEDIA"
 export _IDX_STORE="$STORE"
 export _IDX_CAPTION="$CAPTION"
-export _IDX_VECTORIZER="$VECTORIZER"
-export _IDX_VSTORE="$VSTORE"
+export _IDX_INDEX_STORE="$INDEX_STORE"
 export _IDX_LOG="$LOG"
 export _IDX_FOLDER="$FOLDER"
 export _IDX_CHECKPOINT="$CHECKPOINT"
@@ -65,8 +63,7 @@ nix develop "$REPO#indexer" --command bash -c '
     --media        "$_IDX_MEDIA" \
     --store        "$_IDX_STORE" \
     --caption-model "$_IDX_CAPTION" \
-    --vectorizer   "$_IDX_VECTORIZER" \
-    --vector-store "$_IDX_VSTORE" \
+    --index-store  "$_IDX_INDEX_STORE" \
     --log-level    "$_IDX_LOG" \
     "${EXTRA_ARGS[@]}"
 '

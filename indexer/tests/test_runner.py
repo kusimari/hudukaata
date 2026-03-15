@@ -1,23 +1,23 @@
-"""Integration tests for runner.py — real ChromaDB + real SentenceTransformer."""
+"""Integration tests for runner.py — real ChromaCaptionIndexStore."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-from common.meta import IndexMeta
-from common.pointer import StorePointer
-from common.stores.chroma import ChromaVectorStore
-from common.vectorizers.sentence_transformer import SentenceTransformerVectorizer
+from common.base import IndexMeta, StorePointer
+from common.media import FileMediaSource
 
-from indexer.pointer import MediaPointer
 from indexer.runner import run
+from indexer.stores.chroma_caption import ChromaCaptionIndexStore
 from tests.stubs.caption_model import StubCaptionModel
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _require_vectorizer_model() -> None:
     """Skip the whole module when the sentence-transformer model cannot be loaded."""
+    from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
+
     v = SentenceTransformerVectorizer()
     try:
         v.vectorize("warmup")
@@ -25,8 +25,8 @@ def _require_vectorizer_model() -> None:
         pytest.skip(f"sentence-transformers model unavailable: {exc}")
 
 
-def _media(path: Path) -> MediaPointer:
-    return MediaPointer(scheme="file", remote=None, path=str(path))
+def _media(path: Path) -> FileMediaSource:
+    return FileMediaSource(path=str(path))
 
 
 def _store(path: Path) -> StorePointer:
@@ -68,10 +68,8 @@ class TestRunIntegration:
             _media(media_dir),
             _store(store_dir),
             StubCaptionModel(),
-            SentenceTransformerVectorizer(),
-            ChromaVectorStore(),
-            vectorizer_name="sentence-transformer",
-            vector_store_name="chroma",
+            ChromaCaptionIndexStore(),
+            index_store_name="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         )
         assert (store_dir / "db").is_dir()
 
@@ -80,35 +78,27 @@ class TestRunIntegration:
             _media(media_dir),
             _store(store_dir),
             StubCaptionModel(),
-            SentenceTransformerVectorizer(),
-            ChromaVectorStore(),
-            vectorizer_name="sentence-transformer",
-            vector_store_name="chroma",
+            ChromaCaptionIndexStore(),
+            index_store_name="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         )
         meta = IndexMeta.load(store_dir / "db" / "index_meta.json")
         assert meta.source == f"file://{media_dir}"
-        assert meta.vectorizer == "sentence-transformer"
-        assert meta.vector_store == "chroma"
+        assert meta.index_store == "indexer.stores.chroma_caption.ChromaCaptionIndexStore"
 
     def test_second_run_archives_old_db(self, media_dir, store_dir):
-        vectorizer = SentenceTransformerVectorizer()
         run(
             _media(media_dir),
             _store(store_dir),
             StubCaptionModel(),
-            vectorizer,
-            ChromaVectorStore(),
-            vectorizer_name="sentence-transformer",
-            vector_store_name="chroma",
+            ChromaCaptionIndexStore(),
+            index_store_name="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         )
         run(
             _media(media_dir),
             _store(store_dir),
             StubCaptionModel(),
-            vectorizer,
-            ChromaVectorStore(),
-            vectorizer_name="sentence-transformer",
-            vector_store_name="chroma",
+            ChromaCaptionIndexStore(),
+            index_store_name="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         )
 
         # After second run, an archive db_YYYY-MM-DD should exist

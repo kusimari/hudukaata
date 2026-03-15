@@ -8,13 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from common.meta import INDEXER_VERSION, IndexMeta
-from common.pointer import StorePointer
+from common.base import INDEXER_VERSION, IndexMeta, StorePointer
 
 from indexer.runner import _run
 from tests.stubs.caption_model import StubCaptionModel
-from tests.stubs.vector_store import StubVectorStore
-from tests.stubs.vectorizer import StubVectorizer
+from tests.stubs.index_store import StubIndexStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,8 +46,7 @@ def _write_db_meta(db_path: Path, version: str = INDEXER_VERSION) -> None:
     meta = IndexMeta(
         indexed_at=datetime.now(UTC),
         source="file:///test",
-        vectorizer="stub",
-        vector_store="stub",
+        index_store="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         indexer_version=version,
     )
     meta.save(db_path / "index_meta.json")
@@ -59,22 +56,20 @@ def _make_run_args(
     media_path: Path,
     store_path: Path,
     local_tmp: Path,
-    vector_store: StubVectorStore | None = None,
+    index_store: StubIndexStore | None = None,
     caption_model: StubCaptionModel | None = None,
     folder: str | None = None,
     checkpoint_interval: int = 0,
 ) -> dict:
-    from indexer.pointer import MediaPointer
+    from common.media import FileMediaSource
 
     return dict(
-        media=MediaPointer(scheme="file", remote=None, path=str(media_path)),
+        media=FileMediaSource(path=str(media_path)),
         store=_store(store_path),
         caption_model=caption_model or StubCaptionModel(),
-        vectorizer=StubVectorizer(),
-        vector_store=vector_store or StubVectorStore(),
+        index_store=index_store or StubIndexStore(),
         local_tmp=local_tmp,
-        vectorizer_name="stub",
-        vector_store_name="stub",
+        index_store_name="stub",
         folder=folder,
         checkpoint_interval=checkpoint_interval,
     )
@@ -98,9 +93,9 @@ class TestUnchangedFileSkipped:
         mtime = img_path.stat().st_mtime
 
         # Pre-populate stub store with this file's mtime.
-        vs = StubVectorStore()
-        vs.docs["a.png"] = (
-            [0.0] * 8,
+        idx = StubIndexStore()
+        idx.docs["a.png"] = (
+            "old caption",
             {"caption": "old", "relative_path": "a.png", "file_mtime": str(mtime)},
         )
 
@@ -119,22 +114,22 @@ class TestUnchangedFileSkipped:
 
         caption_model.caption = tracking_caption  # type: ignore[method-assign]
 
-        _run(**_make_run_args(media, store_path, local_tmp, vs, caption_model))
+        _run(**_make_run_args(media, store_path, local_tmp, idx, caption_model))
 
         assert "a.png" not in call_tracker, "unchanged file should have been skipped"
 
     def test_changed_file_is_reprocessed(self, tmp_path: Path) -> None:
-        """A file with a different mtime must be re-captioned and re-vectorised."""
+        """A file with a different mtime must be re-captioned and re-indexed."""
         media = _make_media_dir(tmp_path / "media", ["b.png"])
         store_path = tmp_path / "store"
         store_path.mkdir()
         local_tmp = tmp_path / "work"
         local_tmp.mkdir()
 
-        vs = StubVectorStore()
+        idx = StubIndexStore()
         # Store a stale mtime (0.0) so the file always appears changed.
-        vs.docs["b.png"] = (
-            [0.0] * 8,
+        idx.docs["b.png"] = (
+            "stale caption",
             {"caption": "stale", "relative_path": "b.png", "file_mtime": "0.0"},
         )
 
@@ -152,7 +147,7 @@ class TestUnchangedFileSkipped:
 
         caption_model.caption = tracking_caption  # type: ignore[method-assign]
 
-        _run(**_make_run_args(media, store_path, local_tmp, vs, caption_model))
+        _run(**_make_run_args(media, store_path, local_tmp, idx, caption_model))
 
         assert "b.png" in call_tracker, "changed file must be reprocessed"
 
@@ -166,12 +161,12 @@ class TestVersionForcesFullReindex:
         local_tmp = tmp_path / "work"
         local_tmp.mkdir()
 
-        vs = StubVectorStore()
+        idx = StubIndexStore()
         # Store a doc that should be skipped if version matched — but it won't.
         img_path = media / "c.png"
         mtime = img_path.stat().st_mtime
-        vs.docs["c.png"] = (
-            [0.0] * 8,
+        idx.docs["c.png"] = (
+            "old caption",
             {"caption": "old", "relative_path": "c.png", "file_mtime": str(mtime)},
         )
 
@@ -181,14 +176,14 @@ class TestVersionForcesFullReindex:
         _write_db_meta(db_path, version="0.0.0")
 
         create_empty_calls: list[None] = []
-        original_create_empty = vs.create_empty
+        original_create_empty = idx.create_empty
 
         def tracking_create_empty() -> None:
             create_empty_calls.append(None)
-            vs.docs = {}  # clear docs as create_empty would
+            idx.docs = {}
             original_create_empty()
 
-        vs.create_empty = tracking_create_empty  # type: ignore[method-assign]
+        idx.create_empty = tracking_create_empty  # type: ignore[method-assign]
 
         caption_model = StubCaptionModel()
         call_tracker: list[str] = []
@@ -199,10 +194,87 @@ class TestVersionForcesFullReindex:
 
         caption_model.caption = tracking_caption  # type: ignore[method-assign]
 
-        _run(**_make_run_args(media, store_path, local_tmp, vs, caption_model))
+        _run(**_make_run_args(media, store_path, local_tmp, idx, caption_model))
 
         assert len(create_empty_calls) >= 1, "create_empty must be called on version mismatch"
         assert "c.png" in call_tracker, "all files must be reprocessed on version mismatch"
+
+
+class TestCorruptMetaForcesFullReindex:
+    def test_corrupt_meta_calls_create_empty(self, tmp_path: Path) -> None:
+        """A corrupt index_meta.json (ValueError on load) forces a full reindex."""
+        media = _make_media_dir(tmp_path / "media", ["d.png"])
+        store_path = tmp_path / "store"
+        store_path.mkdir()
+        local_tmp = tmp_path / "work"
+        local_tmp.mkdir()
+
+        idx = StubIndexStore()
+        create_empty_calls: list[None] = []
+        original_create_empty = idx.create_empty
+
+        def tracking_create_empty() -> None:
+            create_empty_calls.append(None)
+            original_create_empty()
+
+        idx.create_empty = tracking_create_empty  # type: ignore[method-assign]
+
+        # Write a v1-format meta (missing required fields) to trigger ValueError on load.
+        db_path = store_path / "db"
+        db_path.mkdir()
+        import json
+
+        (db_path / "index_meta.json").write_text(
+            json.dumps({"vectorizer": "sentence-transformer", "vector_store": "chroma"})
+        )
+
+        caption_model = StubCaptionModel()
+        call_tracker: list[str] = []
+
+        def tracking_caption(mf):  # type: ignore[no-untyped-def]
+            call_tracker.append(mf.relative_path)
+            return mf.relative_path
+
+        caption_model.caption = tracking_caption  # type: ignore[method-assign]
+
+        _run(**_make_run_args(media, store_path, local_tmp, idx, caption_model))
+
+        assert len(create_empty_calls) >= 1, "create_empty must be called on corrupt meta"
+        assert "d.png" in call_tracker, "all files must be reprocessed on corrupt meta"
+
+
+class TestMalformedMtimeTriggersReprocess:
+    def test_malformed_mtime_causes_reprocess(self, tmp_path: Path) -> None:
+        """A non-numeric stored mtime must not crash the run; the file is reprocessed."""
+        media = _make_media_dir(tmp_path / "media", ["e.png"])
+        store_path = tmp_path / "store"
+        store_path.mkdir()
+        local_tmp = tmp_path / "work"
+        local_tmp.mkdir()
+
+        idx = StubIndexStore()
+        idx.docs["e.png"] = (
+            "old caption",
+            {"caption": "old", "relative_path": "e.png", "file_mtime": "not-a-number"},
+        )
+
+        db_path = store_path / "db"
+        db_path.mkdir()
+        _write_db_meta(db_path)
+
+        caption_model = StubCaptionModel()
+        call_tracker: list[str] = []
+        original_caption = caption_model.caption
+
+        def tracking_caption(mf):  # type: ignore[no-untyped-def]
+            call_tracker.append(mf.relative_path)
+            return original_caption(mf)
+
+        caption_model.caption = tracking_caption  # type: ignore[method-assign]
+
+        _run(**_make_run_args(media, store_path, local_tmp, idx, caption_model))
+
+        assert "e.png" in call_tracker, "file with malformed mtime must be reprocessed"
 
 
 class TestFolderScopedScan:
@@ -215,7 +287,7 @@ class TestFolderScopedScan:
         local_tmp = tmp_path / "work"
         local_tmp.mkdir()
 
-        vs = StubVectorStore()
+        idx = StubIndexStore()
         caption_model = StubCaptionModel()
         processed: list[str] = []
 
@@ -225,7 +297,7 @@ class TestFolderScopedScan:
 
         caption_model.caption = tracking_caption  # type: ignore[method-assign]
 
-        _run(**_make_run_args(media_root, store_path, local_tmp, vs, caption_model, folder="sub"))
+        _run(**_make_run_args(media_root, store_path, local_tmp, idx, caption_model, folder="sub"))
 
         assert all("sub/" in p for p in processed), f"Expected only sub/ files, got: {processed}"
         assert not any(p == "root.png" for p in processed)
@@ -239,11 +311,11 @@ class TestMtimeStoredInMetadata:
         local_tmp = tmp_path / "work"
         local_tmp.mkdir()
 
-        vs = StubVectorStore()
-        _run(**_make_run_args(media, store_path, local_tmp, vs))
+        idx = StubIndexStore()
+        _run(**_make_run_args(media, store_path, local_tmp, idx))
 
-        assert "img.png" in vs.docs
-        meta = vs.docs["img.png"][1]
+        assert "img.png" in idx.docs
+        meta = idx.docs["img.png"][1]
         assert "file_mtime" in meta
         assert meta["file_mtime"] != ""
 
@@ -258,18 +330,18 @@ class TestCheckpointWritten:
         local_tmp = tmp_path / "work"
         local_tmp.mkdir()
 
-        vs = StubVectorStore()
+        idx = StubIndexStore()
         checkpoint_calls: list[Path] = []
-        original_checkpoint = vs.checkpoint
+        original_checkpoint = idx.checkpoint
 
         def tracking_checkpoint(path: Path) -> None:
             checkpoint_calls.append(path)
             original_checkpoint(path)
 
-        vs.checkpoint = tracking_checkpoint  # type: ignore[method-assign]
+        idx.checkpoint = tracking_checkpoint  # type: ignore[method-assign]
 
         # interval=1 → checkpoint after every file.
-        _run(**_make_run_args(media, store_path, local_tmp, vs, checkpoint_interval=1))
+        _run(**_make_run_args(media, store_path, local_tmp, idx, checkpoint_interval=1))
 
         assert len(checkpoint_calls) == 3, (
             f"Expected 3 checkpoint calls, got {len(checkpoint_calls)}"
@@ -283,15 +355,7 @@ class TestCheckpointWritten:
         local_tmp = tmp_path / "work"
         local_tmp.mkdir()
 
-        vs = StubVectorStore()
-        _run(**_make_run_args(media, store_path, local_tmp, vs, checkpoint_interval=1))
+        idx = StubIndexStore()
+        _run(**_make_run_args(media, store_path, local_tmp, idx, checkpoint_interval=1))
 
-        # After the run finishes, db_checkpoint may have been cleaned up by
-        # cleanup_stale_tmp on a subsequent run, but during this run it was
-        # written to the store (file:// → just a directory).
-        # We verify the stub checkpoint method was called (indirectly via the
-        # tracking in the previous test), but here we check the store directly.
-        # The store for file:// puts directories at store_path/<name>.
-        # db_checkpoint is cleaned at the START of the run, not at the end,
-        # so after a complete run it will still be present.
         assert (store_path / "db_checkpoint").is_dir()

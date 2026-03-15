@@ -32,44 +32,31 @@ class TestLoad:
 
     def test_returns_app_state(self, index_db: Path) -> None:
         """load() with a valid store returns AppState with the right top_k."""
-        stub_vs = MagicMock()
-        stub_vz = MagicMock()
+        stub_idx = MagicMock()
 
-        with (
-            patch("search.startup.resolve_vector_store", return_value=stub_vs),
-            patch("search.startup.resolve_vectorizer", return_value=stub_vz),
-        ):
+        with patch("search.startup.resolve_index_store", return_value=stub_idx):
             state = load(_settings(f"file://{index_db}", top_k=3))
 
         assert isinstance(state, AppState)
         assert state.top_k == 3
-        assert state.vector_store is stub_vs
-        assert state.vectorizer is stub_vz
+        assert state.index_store is stub_idx
 
-    def test_vector_store_load_called_with_db_path(self, index_db: Path) -> None:
-        """The vector store's load() must be called with the local db path."""
-        stub_vs = MagicMock()
-        stub_vz = MagicMock()
+    def test_index_store_load_called_with_db_path(self, index_db: Path) -> None:
+        """The index store's load() must be called with the local db path."""
+        stub_idx = MagicMock()
 
-        with (
-            patch("search.startup.resolve_vector_store", return_value=stub_vs),
-            patch("search.startup.resolve_vectorizer", return_value=stub_vz),
-        ):
+        with patch("search.startup.resolve_index_store", return_value=stub_idx):
             load(_settings(f"file://{index_db}"))
 
-        stub_vs.load.assert_called_once()
-        called_path: Path = stub_vs.load.call_args[0][0]
+        stub_idx.load.assert_called_once()
+        called_path: Path = stub_idx.load.call_args[0][0]
         assert called_path.name == "db"
 
     def test_file_scheme_db_tmp_path_is_none(self, index_db: Path) -> None:
         """For file:// sources, no temp dir cleanup is needed."""
-        stub_vs = MagicMock()
-        stub_vz = MagicMock()
+        stub_idx = MagicMock()
 
-        with (
-            patch("search.startup.resolve_vector_store", return_value=stub_vs),
-            patch("search.startup.resolve_vectorizer", return_value=stub_vz),
-        ):
+        with patch("search.startup.resolve_index_store", return_value=stub_idx):
             state = load(_settings(f"file://{index_db}"))
 
         assert state._db_tmp_path is None

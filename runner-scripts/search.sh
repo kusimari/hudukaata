@@ -40,10 +40,15 @@ echo "    media : $MEDIA"
 echo "    url   : http://0.0.0.0:$PORT"
 echo ""
 
-nix develop "$REPO#search" --command bash -c "
-  SEARCH_STORE='$STORE' \
-  SEARCH_MEDIA='$MEDIA' \
-  SEARCH_PORT='$PORT' \
-  SEARCH_LOG_LEVEL='$LOG' \
+export _SRCH_STORE="$STORE"
+export _SRCH_MEDIA="$MEDIA"
+export _SRCH_PORT="$PORT"
+export _SRCH_LOG="$LOG"
+
+nix develop "$REPO#search" --command bash -c '
+  SEARCH_STORE="$_SRCH_STORE" \
+  SEARCH_MEDIA="$_SRCH_MEDIA" \
+  SEARCH_PORT="$_SRCH_PORT" \
+  SEARCH_LOG_LEVEL="$_SRCH_LOG" \
   python -m search
-"
+'

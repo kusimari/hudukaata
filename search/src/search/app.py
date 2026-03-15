@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
-from collections.abc import AsyncGenerator, Iterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -70,17 +69,6 @@ class SearchResult(BaseModel):
     extra: dict[str, str] = Field(default_factory=dict)
 
 
-def _to_result(raw: dict[str, Any]) -> SearchResult:
-    known = {"id", "caption", "relative_path"}
-    extra = {k: str(v) for k, v in raw.items() if k not in known}
-    return SearchResult(
-        id=str(raw.get("id", "")),
-        caption=str(raw.get("caption", "")),
-        relative_path=str(raw.get("relative_path", "")),
-        extra=extra,
-    )
-
-
 def _get_ctx() -> AppState:
     """Return the AppState, raising 503 if startup did not complete."""
     ctx: AppState | None = getattr(app.state, "ctx", None)
@@ -98,9 +86,16 @@ async def search(
     ctx = _get_ctx()
     if not q.strip():
         raise HTTPException(status_code=422, detail="Query string 'q' must not be empty.")
-    vector = await asyncio.to_thread(ctx.vectorizer.vectorize, q)
-    raw_results = ctx.vector_store.query(vector, n_results=n if n is not None else ctx.top_k)
-    return [_to_result(r) for r in raw_results]
+    results = await asyncio.to_thread(ctx.index_store.search, q, n if n is not None else ctx.top_k)
+    return [
+        SearchResult(
+            id=r.id,
+            caption=r.caption,
+            relative_path=r.relative_path,
+            extra=r.extra,
+        )
+        for r in results
+    ]
 
 
 @app.get("/media/{path:path}")
@@ -108,20 +103,18 @@ async def media(path: str) -> StreamingResponse:
     """Stream a media file from the configured media root by its relative path."""
     ctx = _get_ctx()
 
-    # Prevent path traversal: reject any path that contains '..'.
-    if ".." in Path(path).parts:
+    # Prevent path traversal: reject '..', absolute prefixes, and percent-encoded variants.
+    if (
+        ".." in Path(path).parts
+        or path.startswith("/")
+        or "%2e" in path.lower()
+        or "%2f" in path.lower()
+    ):
         raise HTTPException(status_code=400, detail="Invalid path.")
 
-    def _stream_file(local_path: Path) -> Iterator[bytes]:
-        with local_path.open("rb") as fh:
-            while True:
-                chunk = fh.read(_CHUNK_SIZE)
-                if not chunk:
-                    break
-                yield chunk
-
     def _serve() -> StreamingResponse:
-        with ctx.media_ptr.get_file_ctx(path) as local_path:
+        with ctx.media_src.getmedia(path) as mf:
+            local_path = mf.local_path
             if not local_path.is_file():
                 raise HTTPException(status_code=404, detail="Media file not found.")
             mime_type, _ = mimetypes.guess_type(str(local_path))

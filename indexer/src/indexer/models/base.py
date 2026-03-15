@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from indexer.pointer import MediaFile
+from common.media import MediaFile
 
 
 class CaptionModel(ABC):

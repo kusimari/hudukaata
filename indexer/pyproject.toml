@@ -15,12 +15,14 @@ dependencies = [
     # exif
     "exifread>=3.0",
     "mutagen>=1.47",
+    # vectorizer
+    "sentence-transformers>=3.0",
+    # vector store
+    "chromadb>=0.5",
     # CLI
     "click>=8.1",
     # progress
     "tqdm>=4.66",
-    # common (vectorizer + vector store shared implementations)
-    # installed separately by the devShell hook
 ]
 
 [project.optional-dependencies]
@@ -61,5 +63,6 @@ module = [
     "exifread.*",
     "whisper.*",
     "sentence_transformers.*",
+    "google.colab.*",
 ]
 ignore_missing_imports = true

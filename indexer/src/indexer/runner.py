@@ -7,15 +7,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from common.meta import INDEXER_VERSION, IndexMeta
-from common.pointer import StorePointer
-from common.stores.base import VectorStore
-from common.vectorizers.base import Vectorizer
+from common.base import INDEXER_VERSION, IndexMeta, StorePointer
+from common.index import IndexStore
+from common.media import MediaSource
 from tqdm import tqdm
 
 from indexer.exif import extract_exif
 from indexer.models.base import CaptionModel
-from indexer.pointer import MediaPointer
 from indexer.swap import cleanup_stale_tmp, commit, prepare_temp_dir
 from indexer.text import format_text
 
@@ -23,23 +21,21 @@ logger = logging.getLogger(__name__)
 
 
 def run(
-    media: MediaPointer,
+    media: MediaSource,
     store: StorePointer,
     caption_model: CaptionModel,
-    vectorizer: Vectorizer,
-    vector_store: VectorStore,
-    vectorizer_name: str,
-    vector_store_name: str,
+    index_store: IndexStore,
+    index_store_name: str,
     folder: str | None = None,
     checkpoint_interval: int = 100,
 ) -> None:
-    """Index media files and write them to the vector store.
+    """Index media files and write them to the index store.
 
     When *folder* is given, only files under that subfolder of *media* are
     scanned.  An existing index is updated incrementally — files whose
     modification timestamp has not changed since the last run are skipped.
     If the stored ``indexer_version`` differs from
-    :data:`~common.meta.INDEXER_VERSION` a full rebuild is forced.
+    :data:`~common.base.INDEXER_VERSION` a full rebuild is forced.
 
     A checkpoint is written to the store every *checkpoint_interval* files so
     that a process kill leaves a usable partial index.
@@ -51,25 +47,21 @@ def run(
             media,
             store,
             caption_model,
-            vectorizer,
-            vector_store,
+            index_store,
             Path(tmp_str),
-            vectorizer_name,
-            vector_store_name,
+            index_store_name,
             folder=folder,
             checkpoint_interval=checkpoint_interval,
         )
 
 
 def _run(
-    media: MediaPointer,
+    media: MediaSource,
     store: StorePointer,
     caption_model: CaptionModel,
-    vectorizer: Vectorizer,
-    vector_store: VectorStore,
+    index_store: IndexStore,
     local_tmp: Path,
-    vectorizer_name: str,
-    vector_store_name: str,
+    index_store_name: str,
     folder: str | None = None,
     checkpoint_interval: int = 100,
 ) -> None:
@@ -78,11 +70,14 @@ def _run(
 
     if store.has_dir("db"):
         with store.get_dir_ctx("db") as existing_db_path:
-            existing_created_at = vector_store.created_at(existing_db_path)
+            existing_created_at = index_store.created_at(existing_db_path)
             meta_path = existing_db_path / "index_meta.json"
             if meta_path.exists():
-                existing_meta = IndexMeta.load(meta_path)
-                stored_version = existing_meta.indexer_version
+                try:
+                    existing_meta = IndexMeta.load(meta_path)
+                    stored_version = existing_meta.indexer_version
+                except ValueError:
+                    stored_version = ""
             else:
                 stored_version = ""
 
@@ -93,15 +88,15 @@ def _run(
                     stored_version,
                     INDEXER_VERSION,
                 )
-                vector_store.create_empty()
+                index_store.create_empty()
             else:
                 logger.info(
                     "Existing DB found (created at %s); updating incrementally.",
                     existing_created_at,
                 )
-                vector_store.load_for_update(existing_db_path)
+                index_store.load_for_update(existing_db_path)
     else:
-        vector_store.create_empty()
+        index_store.create_empty()
 
     prepare_temp_dir(store, local_tmp)
 
@@ -117,13 +112,17 @@ def _run(
 
         # Skip files that are already indexed and whose mtime is unchanged.
         if not force_reindex:
-            existing = vector_store.get_metadata(mf.relative_path)
+            existing = index_store.get_metadata(mf.relative_path)
             if existing is not None:
                 stored_mtime = existing.get("file_mtime")
+                try:
+                    stored_mtime_f: float | None = float(stored_mtime) if stored_mtime else None
+                except ValueError:
+                    stored_mtime_f = None
                 if (
-                    stored_mtime
+                    stored_mtime_f is not None
                     and mf.mtime is not None
-                    and abs(float(stored_mtime) - mf.mtime) < 1.0
+                    and abs(stored_mtime_f - mf.mtime) < 1.0
                 ):
                     logger.debug("Skipping unchanged %s", mf.relative_path)
                     continue
@@ -134,7 +133,6 @@ def _run(
                 caption = caption_model.caption(mf)
                 exif = extract_exif(mf)
                 text = format_text(caption, exif)
-                vector = vectorizer.vectorize(text)
             except Exception as exc:
                 logger.warning("Skipping %s: %s", mf.relative_path, exc)
                 continue
@@ -144,23 +142,22 @@ def _run(
                 "file_mtime": file_mtime,
                 **exif,
             }
-            vector_store.upsert(mf.relative_path, vector, metadata)
+            index_store.upsert(mf.relative_path, text, metadata)
 
         processed += 1
         if checkpoint_interval > 0 and processed % checkpoint_interval == 0:
             checkpoint_local = local_tmp / "db_checkpoint"
-            vector_store.checkpoint(checkpoint_local)
+            index_store.checkpoint(checkpoint_local)
             store.put_dir(checkpoint_local, dest_name="db_checkpoint")
             logger.info("Checkpoint written after %d files.", processed)
 
     db_new_path = local_tmp / "db_new"
-    vector_store.save(db_new_path)
+    index_store.save(db_new_path)
     logger.info("Saved new DB to %s", db_new_path)
 
     meta = IndexMeta.now(
         source=media.uri,
-        vectorizer=vectorizer_name,
-        vector_store=vector_store_name,
+        index_store=index_store_name,
     )
     meta.save(db_new_path / "index_meta.json")
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from indexer.pointer import StorePointer
+from common.base import StorePointer
+
 from indexer.swap import cleanup_stale_tmp, commit, prepare_temp_dir
 
 

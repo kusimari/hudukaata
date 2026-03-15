@@ -10,8 +10,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from common.media import MediaFile
+
 from indexer.models.base import CaptionModel
-from indexer.pointer import MediaFile
 
 logger = logging.getLogger(__name__)
 

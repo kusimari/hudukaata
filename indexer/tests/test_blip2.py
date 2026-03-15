@@ -15,9 +15,9 @@ from typing import Literal, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from common.media import MediaFile, _LocalFile
 
 from indexer.models.blip2 import Blip2CaptionModel
-from indexer.pointer import MediaFile, _LocalFile
 
 
 def _mf(path: Path, media_type: str) -> MediaFile:

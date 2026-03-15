@@ -1,0 +1,206 @@
+"""ChromaCaptionIndexStore — Chroma + SentenceTransformer implementation of IndexStore.
+
+All vectorization is internal.  Callers pass and receive plain text.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from common.index import IndexResult, IndexStore
+
+from indexer.vectorizers.base import Vectorizer
+
+_META_FILE = "db_meta.json"
+_COLLECTION_NAME = "media"
+
+
+class ChromaCaptionIndexStore(IndexStore):
+    """Caption-based semantic search: SentenceTransformer vectors + ChromaDB storage.
+
+    Inject *vectorizer* for testing; leave ``None`` to use the default
+    :class:`~indexer.vectorizers.sentence_transformer.SentenceTransformerVectorizer`.
+    """
+
+    def __init__(self, vectorizer: Vectorizer | None = None) -> None:
+        if vectorizer is not None:
+            self._vec: Vectorizer = vectorizer
+        else:
+            from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
+
+            self._vec = SentenceTransformerVectorizer()
+        self._client: Any = None
+        self._collection: Any = None
+        self._tmp_dir: Path | None = None
+        self._created_at: datetime | None = None
+        self._meta_cache: dict[str, dict[str, str]] | None = None
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _require_collection(self) -> Any:
+        if self._collection is None:
+            raise RuntimeError(
+                "ChromaCaptionIndexStore not initialised. Call load() or create_empty() first."
+            )
+        return self._collection
+
+    # ------------------------------------------------------------------
+    # IndexStore — read
+    # ------------------------------------------------------------------
+
+    def search(self, query: str, top_k: int) -> list[IndexResult]:
+        col = self._require_collection()
+        vector = self._vec.vectorize(query)
+        effective_n = min(top_k, col.count())
+        if effective_n == 0:
+            return []
+        results = col.query(
+            query_embeddings=[vector],
+            n_results=effective_n,
+            include=["metadatas", "distances"],
+        )
+        out: list[IndexResult] = []
+        ids = results.get("ids", [[]])[0]
+        metadatas = results.get("metadatas", [[]])[0]
+        distances = results.get("distances", [[]])[0]
+        for id_, meta, dist in zip(ids, metadatas, distances, strict=True):
+            score = max(0.0, 1.0 - dist)
+            out.append(
+                IndexResult(
+                    id=id_,
+                    relative_path=meta.get("relative_path", id_),
+                    caption=meta.get("caption", ""),
+                    score=score,
+                )
+            )
+        return out
+
+    def get_metadata(self, id: str) -> dict[str, str] | None:
+        col = self._require_collection()
+        if self._meta_cache is None:
+            result = col.get(include=["metadatas"])
+            self._meta_cache = {
+                doc_id: meta
+                for doc_id, meta in zip(result["ids"], result["metadatas"], strict=True)
+            }
+        return self._meta_cache.get(id)
+
+    # ------------------------------------------------------------------
+    # IndexStore — write
+    # ------------------------------------------------------------------
+
+    def add(self, id: str, text: str, metadata: dict[str, str]) -> None:
+        col = self._require_collection()
+        vector = self._vec.vectorize(text)
+        col.add(ids=[id], embeddings=[vector], metadatas=[metadata])
+
+    def upsert(self, id: str, text: str, metadata: dict[str, str]) -> None:
+        col = self._require_collection()
+        vector = self._vec.vectorize(text)
+        col.upsert(ids=[id], embeddings=[vector], metadatas=[metadata])
+        if self._meta_cache is not None:
+            self._meta_cache[id] = metadata
+
+    # ------------------------------------------------------------------
+    # IndexStore — lifecycle
+    # ------------------------------------------------------------------
+
+    def load(self, local_path: Path) -> None:
+        import chromadb
+        from chromadb.config import Settings
+
+        self._client = chromadb.PersistentClient(
+            path=str(local_path),
+            settings=Settings(anonymized_telemetry=False),
+        )
+        self._collection = self._client.get_collection(_COLLECTION_NAME)
+
+    def create_empty(self) -> None:
+        import chromadb
+        from chromadb.config import Settings
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_"))
+        try:
+            client = chromadb.PersistentClient(
+                path=str(tmp_dir),
+                settings=Settings(anonymized_telemetry=False),
+            )
+            collection = client.create_collection(_COLLECTION_NAME)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        self._tmp_dir = tmp_dir
+        self._client = client
+        self._collection = collection
+        self._created_at = None
+        self._meta_cache = None
+
+    def save(self, local_path: Path) -> None:
+        if self._tmp_dir is None:
+            raise RuntimeError(
+                "save() requires the store to have been initialised via create_empty() "
+                "or load_for_update(). load() is for read queries only."
+            )
+        self._client = None
+        self._collection = None
+        self._meta_cache = None
+        tmp_dir = self._tmp_dir
+        self._tmp_dir = None
+        created_ts = (self._created_at or datetime.now(UTC)).isoformat()
+        self._created_at = None
+        try:
+            (tmp_dir / _META_FILE).write_text(json.dumps({"created_at": created_ts}))
+            if local_path.exists():
+                shutil.rmtree(local_path)
+            shutil.move(str(tmp_dir), str(local_path))
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+
+    def created_at(self, local_path: Path) -> datetime | None:
+        meta_path = local_path / _META_FILE
+        if not meta_path.exists():
+            return None
+        try:
+            data = json.loads(meta_path.read_text())
+            return datetime.fromisoformat(data["created_at"])
+        except (json.JSONDecodeError, KeyError, ValueError):
+            return None
+
+    def load_for_update(self, local_path: Path) -> None:
+        import chromadb
+        from chromadb.config import Settings
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_upd_"))
+        try:
+            shutil.copytree(str(local_path), str(tmp_dir), dirs_exist_ok=True)
+            client = chromadb.PersistentClient(
+                path=str(tmp_dir),
+                settings=Settings(anonymized_telemetry=False),
+            )
+            collection = client.get_collection(_COLLECTION_NAME)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        self._tmp_dir = tmp_dir
+        self._client = client
+        self._collection = collection
+        self._created_at = self.created_at(local_path)
+        self._meta_cache = None
+
+    def checkpoint(self, local_path: Path) -> None:
+        if self._tmp_dir is None:
+            raise RuntimeError(
+                "checkpoint() requires the store to be initialised via "
+                "create_empty() or load_for_update()"
+            )
+        if local_path.exists():
+            shutil.rmtree(local_path)
+        shutil.copytree(str(self._tmp_dir), str(local_path))

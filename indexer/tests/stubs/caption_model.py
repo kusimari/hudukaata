@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from common.media import MediaFile
+
 from indexer.models.base import CaptionModel
-from indexer.pointer import MediaFile
 
 
 class StubCaptionModel(CaptionModel):

@@ -6,12 +6,7 @@ build-backend = "hatchling.build"
 name = "common"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = [
-    # vector store
-    "chromadb>=0.5",
-    # vectorizer
-    "sentence-transformers>=3.0",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
@@ -40,8 +35,8 @@ strict = true
 files = ["src/common"]
 
 [[tool.mypy.overrides]]
-# These packages ship no type stubs and have no third-party stub packages.
+# google.colab is only available inside Colab; ignore missing stubs.
 module = [
-    "sentence_transformers.*",
+    "google.colab.*",
 ]
 ignore_missing_imports = true

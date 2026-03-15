@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+from common.media import MediaFile, _LocalFile
 
 from indexer.exif import extract_exif
-from indexer.pointer import MediaFile, _LocalFile
 
 
 @pytest.fixture()

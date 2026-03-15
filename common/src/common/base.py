@@ -1,17 +1,8 @@
-"""StorePointer — abstract file:// and rclone: URI schemes for read/write store access.
-
-StorePointer is for *reading and writing* database directories (get_dir, put_dir, etc.).
-
-Usage::
-
-    store = StorePointer.parse("file:///data/mystore")
-    with store.get_dir_ctx("db") as db_path:
-        # db_path is a local Path; cleaned up on exit for rclone sources
-        process(db_path)
-"""
+"""StorePointer, IndexMeta, and resolve_instance — shared utilities."""
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 import shutil
@@ -19,16 +10,33 @@ import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Self
 
 # ---------------------------------------------------------------------------
-# Shared base (URI parsing + rclone helpers)
+# Constants
+# ---------------------------------------------------------------------------
+
+INDEX_META_FILE = "index_meta.json"
+"""Filename of the index metadata sidecar written inside the DB directory."""
+
+INDEXER_VERSION = "2.0.0"
+"""Current indexer pipeline version.
+
+Bumped from 1.0.0: IndexMeta now records ``index_store`` instead of
+``vectorizer`` / ``vector_store``.  The indexer forces a full rebuild when
+the stored version differs from this constant.
+"""
+
+# ---------------------------------------------------------------------------
+# Shared URI-parsing base (private)
 # ---------------------------------------------------------------------------
 
 
 class _BasePointer:
-    """Common fields and helpers shared by StorePointer (and MediaPointer in indexer)."""
+    """Common fields and helpers shared by StorePointer."""
 
     def __init__(
         self,
@@ -72,12 +80,7 @@ class _BasePointer:
                     "rclone remote name must contain only alphanumerics, hyphens, underscores,"
                     f" or dots (got {remote!r})"
                 )
-            path_part = rest[colon_pos + 1 :]
-            # rclone remote paths are always relative to the remote root, so we
-            # strip all leading slashes to produce a canonical form.  The uri
-            # property always rebuilds as rclone:remote:///path, so the round-
-            # trip is stable regardless of how many slashes the caller supplied.
-            path = path_part.lstrip("/")
+            path = rest[colon_pos + 1 :].lstrip("/")
             return cls(scheme="rclone", remote=remote, path=path)
 
         raise ValueError(f"Unsupported URI scheme: {uri!r}")
@@ -143,15 +146,7 @@ class StorePointer(_BasePointer):
 
     @contextmanager
     def get_dir_ctx(self, name: str | None = None) -> Generator[Path, None, None]:
-        """Context manager that yields a local path to the named subdirectory.
-
-        For ``file://`` sources this is the directory itself (no copy, no
-        cleanup).  For ``rclone:`` sources the directory is downloaded into a
-        temporary folder which is automatically deleted on exit::
-
-            with store.get_dir_ctx("db") as local_db:
-                created_at = vector_store.created_at(local_db)
-        """
+        """Context manager that yields a local path to the named subdirectory."""
         local = self.get_dir(name)
         try:
             yield local
@@ -161,15 +156,7 @@ class StorePointer(_BasePointer):
 
     @contextmanager
     def get_file_ctx(self, relative_path: str) -> Generator[Path, None, None]:
-        """Yield a local path to a single file at *relative_path* within this pointer's root.
-
-        For ``file://`` sources the path is returned directly — no copy, no cleanup.
-        For ``rclone:`` sources the file is downloaded to a temporary directory,
-        yielded, and the directory is removed on exit::
-
-            with pointer.get_file_ctx("photos/sunset.jpg") as local:
-                data = local.read_bytes()
-        """
+        """Yield a local path to a single file at *relative_path* within this pointer's root."""
         if self.scheme == "file":
             yield Path(self.path) / relative_path
         else:
@@ -223,3 +210,128 @@ class StorePointer(_BasePointer):
                 shutil.rmtree(target)
         else:
             self._rclone_run(["purge", f"{self.remote}:{self.path}/{name}"])
+
+
+# ---------------------------------------------------------------------------
+# IndexMeta — typed representation of index_meta.json
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IndexMeta:
+    """Metadata written by the indexer and read by the search server.
+
+    Stored as JSON at ``<db_dir>/index_meta.json``.
+    """
+
+    indexed_at: datetime
+    source: str
+    index_store: str
+    """Dotted import path to the :class:`~common.index.IndexStore` implementation used.
+
+    Written by the indexer; read by the search server to resolve the right class.
+    Example: ``"indexer.stores.chroma_caption.ChromaCaptionIndexStore"``
+    """
+    indexer_version: str = ""
+
+    @staticmethod
+    def load(path: Path) -> IndexMeta:
+        """Load from a JSON file.
+
+        Raises:
+            FileNotFoundError: if the file does not exist.
+            ValueError: if the file contains invalid JSON, is missing required
+                fields, or was written by an older indexer version that used
+                ``vectorizer`` / ``vector_store`` fields instead of
+                ``index_store``.
+        """
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Malformed JSON in {path}: {exc}") from exc
+
+        # Detect old-format meta written before INDEXER_VERSION 2.0.0.
+        if "index_store" not in data and ("vectorizer" in data or "vector_store" in data):
+            raise ValueError(
+                f"Index at {path} was built with an older version of the indexer "
+                "(vectorizer/vector_store fields). Re-run the indexer to rebuild."
+            )
+
+        try:
+            return IndexMeta(
+                indexed_at=datetime.fromisoformat(data["indexed_at"]),
+                source=data["source"],
+                index_store=data["index_store"],
+                indexer_version=data.get("indexer_version", ""),
+            )
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"Cannot parse field {exc} in {path}") from exc
+
+    def save(self, path: Path) -> None:
+        """Write to a JSON file, creating parent directories as needed."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        out = asdict(self)
+        out["indexed_at"] = self.indexed_at.isoformat()
+        path.write_text(json.dumps(out, indent=2))
+
+    @staticmethod
+    def now(
+        source: str,
+        index_store: str,
+        indexer_version: str = INDEXER_VERSION,
+    ) -> IndexMeta:
+        """Construct an :class:`IndexMeta` stamped with the current UTC time."""
+        return IndexMeta(
+            indexed_at=datetime.now(UTC),
+            source=source,
+            index_store=index_store,
+            indexer_version=indexer_version,
+        )
+
+
+# ---------------------------------------------------------------------------
+# resolve_instance — generic plugin loader
+# ---------------------------------------------------------------------------
+
+
+def resolve_instance(
+    name: str,
+    registry: dict[str, type[Any]],
+    kind: str,
+    expected_type: type[Any],
+) -> Any:
+    """Return an instance for *name*, looked up in *registry* or via dotted import.
+
+    The resolved class must be a subclass of *expected_type*; otherwise a
+    ``ValueError`` is raised.  This prevents index_meta.json from being used to
+    instantiate arbitrary classes.
+
+    Args:
+        name: Short registry key (e.g. ``"chroma"``) or dotted import path
+            (e.g. ``"indexer.stores.chroma_caption.ChromaCaptionIndexStore"``).
+        registry: Mapping of short names to concrete types.
+        kind: Human-readable label used in error messages (e.g. ``"index-store"``).
+        expected_type: ABC or base class that the resolved class must implement.
+
+    Returns:
+        An instance of the resolved class.
+
+    Raises:
+        ValueError: if *name* cannot be resolved or the resolved class does not
+            implement *expected_type*.
+    """
+    if name in registry:
+        cls: type[Any] = registry[name]
+    else:
+        try:
+            module_path, class_name = name.rsplit(".", 1)
+            module = importlib.import_module(module_path)
+            cls = getattr(module, class_name)
+        except Exception as exc:
+            raise ValueError(f"Cannot load {kind} {name!r}: {exc}") from exc
+
+    if not (isinstance(cls, type) and issubclass(cls, expected_type)):
+        raise ValueError(
+            f"{kind} {name!r} must be a subclass of {expected_type.__name__}, got {cls!r}"
+        )
+    return cls()
