@@ -2,10 +2,12 @@
 
 ## Goal
 
-Refactor `common` to a flat three-file structure that owns two clean
-domain-level interfaces **and** their default implementations. External
-consumers import only the interfaces; concrete classes are accessible via their
-module but not advertised in `__init__.py`.
+Refactor `common` to a flat three-file structure that owns **interfaces and
+cross-cutting utilities only** — no concrete index implementations.
+`ChromaCaptionIndexStore` (and all its dependencies: Chroma, SentenceTransformer,
+Vectorizer) lives in `indexer`. `search` never imports `indexer` directly; it
+loads the right implementation at runtime via `resolve_instance()` and the dotted
+class path stored in `index_meta.json`.
 
 The **linkage contract**: `IndexResult.relative_path` == `MediaFile.relative_path`
 — every value stored in the index can be fetched from the media source without
@@ -19,11 +21,11 @@ any path translation.
 common/src/common/
 ├── __init__.py       # re-exports interfaces only: MediaSource, MediaFile,
 │                     #   IndexStore, IndexResult, StorePointer, IndexMeta
-├── base.py           # StorePointer, IndexMeta, resolve_instance()
+├── base.py           # StorePointer, IndexMeta, INDEX_META_FILE, INDEXER_VERSION
+│                     #   resolve_instance() (used by search to load impls by dotted path)
 ├── media.py          # MediaFile, MediaSource (ABC)
 │                     #   + FileMediaSource, RcloneMediaSource, GdriveMediaSource
-└── index.py          # IndexResult, IndexStore (ABC)
-│                     #   + ChromaCaptionIndexStore (Chroma + SentenceTransformer)
+└── index.py          # IndexResult (dataclass), IndexStore (ABC only — no impl)
 ```
 
 Everything else — `meta.py`, `pointer.py`, `plugins.py`, `registry.py`,
@@ -37,10 +39,11 @@ above.
 ### `base.py`
 
 Consolidates `pointer.py` + `meta.py` + `plugins.py`. Deletes `registry.py`
-(no shared registry needed once implementations live here).
+(no shared registry needed — impls live in `indexer`).
 
 Public names: `StorePointer`, `IndexMeta`, `INDEX_META_FILE`, `INDEXER_VERSION`.
-Internal: `resolve_instance()` (used by search to load IndexStore by dotted path).
+Internal: `resolve_instance()` — dynamically loads a class by dotted import path
+and validates it is a subclass of the expected ABC.
 
 ### `media.py`
 
@@ -49,20 +52,16 @@ Public interface: `MediaFile`, `MediaSource` (ABC with `uri`, `scan()`, `getmedi
 
 Implementations (accessible from `common.media`, not re-exported from `__init__`):
 `FileMediaSource`, `RcloneMediaSource`, `GdriveMediaSource`.
+These are filesystem adapters — they carry no knowledge of indexing or search.
 
 Internal helpers: `_rclone_run()`, `_rclone_lsjson()`, `_LocalFile`, `_RcloneFile`,
 `_RcloneGetFile`, extension sets, `_EXT_TO_TYPE`.
 
 ### `index.py`
 
-Public interface: `IndexResult` (dataclass), `IndexStore` (ABC).
+**Interfaces only.** No imports of Chroma, SentenceTransformer, or any vectorizer.
 
-Implementation (accessible from `common.index`, not re-exported from `__init__`):
-`ChromaCaptionIndexStore` — embeds SentenceTransformer vectorization + ChromaDB
-storage. Callers pass and receive **plain text only**; no vectors exposed.
-
-Internal: `Vectorizer` ABC, `SentenceTransformerVectorizer` (private, used only
-by `ChromaCaptionIndexStore`).
+Public names: `IndexResult` (dataclass), `IndexStore` (ABC).
 
 ---
 
@@ -134,18 +133,6 @@ class IndexStore(ABC):
     def checkpoint(self, local_path: Path) -> None: ...
 ```
 
-### `ChromaCaptionIndexStore` (in `index.py`, not exported from `__init__`)
-
-```python
-class ChromaCaptionIndexStore(IndexStore):
-    def __init__(self, vectorizer: _Vectorizer | None = None) -> None: ...
-    # search(query: str) → vectorizes internally, queries Chroma, returns IndexResult list
-    # upsert/add(id, text, metadata) → vectorizes internally, stores in Chroma
-    # lifecycle: load / create_empty / save / created_at / load_for_update / checkpoint
-    #            (all logic moved verbatim from ChromaVectorStore)
-    # score = max(0.0, 1.0 - distance)
-```
-
 ### `base.py` — `IndexMeta` changes
 
 ```python
@@ -169,12 +156,15 @@ absent but old `vectorizer`/`vector_store` fields are present.
 
 | File | Action |
 |------|--------|
+| `stores/__init__.py` | **Create** |
+| `stores/chroma_caption.py` | **Create** `ChromaCaptionIndexStore(IndexStore)`: Chroma + SentenceTransformer; all vectorization internal; lifecycle logic moved verbatim from `ChromaVectorStore`; score = `max(0, 1 - distance)` |
 | `pointer.py` | Thin shim: re-export `MediaSource`, `MediaFile`, `FileMediaSource`, `RcloneMediaSource`, `GdriveMediaSource` from `common.media`; keep `MediaPointer` factory |
 | `runner.py` | Single `index_store: IndexStore` param replaces `vectorizer + vector_store`; `index_store.upsert(id, text, meta)` replaces separate vectorize + store calls |
-| `cli.py` | `--index-store` (default `"common.index.ChromaCaptionIndexStore"`) replaces `--vectorizer` + `--vector-store` |
+| `cli.py` | `--index-store` (default `"indexer.stores.chroma_caption.ChromaCaptionIndexStore"`) replaces `--vectorizer` + `--vector-store` |
 | `tests/stubs/index_store.py` | **Create** `StubIndexStore(IndexStore)` with no-op write + stub `search()` |
 | `tests/stubs/vector_store.py` | **Delete** |
 | `tests/stubs/vectorizer.py` | **Delete** |
+| `tests/test_chroma_caption_store.py` | **Create**: moved + updated from `common/tests/test_chroma_store.py` |
 | `tests/test_runner.py` | `StubIndexStore` replaces separate vectorizer/vector_store stubs |
 | `tests/test_runner_update.py` | same |
 
@@ -202,8 +192,9 @@ from common.media import MediaFile, MediaSource
 from common.index import IndexResult, IndexStore
 ```
 
-Concrete classes (`FileMediaSource`, `ChromaCaptionIndexStore`, etc.) are
-importable from their modules but not listed here.
+`FileMediaSource`, `RcloneMediaSource`, `GdriveMediaSource` are importable from
+`common.media` but not listed here — callers get them via `MediaSource.from_uri()`.
+No concrete `IndexStore` implementation lives in `common`.
 
 ---
 
@@ -212,34 +203,36 @@ importable from their modules but not listed here.
 ### Phase A — common
 1. Write `common/src/common/base.py` (StorePointer + IndexMeta + resolve_instance)
 2. Write `common/src/common/media.py` (MediaFile + MediaSource + 3 implementations)
-3. Write `common/src/common/index.py` (IndexResult + IndexStore + ChromaCaptionIndexStore)
+3. Write `common/src/common/index.py` (IndexResult + IndexStore ABC only — no impl)
 4. Write new `common/src/common/__init__.py` (interface-only exports)
 5. Delete: `pointer.py`, `meta.py`, `plugins.py`, `registry.py`, `stores/`, `vectorizers/`
 6. Update `common/tests/`: delete `test_chroma_store.py`, update `test_meta.py` →
    `test_base.py`, update `test_pointer.py` → `test_base.py`, create `test_media.py`,
-   create `test_index.py`
+   create `test_index.py` (ABC contract tests only)
 7. Run common dev loop
 
 ### Phase B — indexer
-8. Thin `indexer/pointer.py` to re-exports from `common.media`
-9. Update `indexer/runner.py` — `IndexStore` replaces `Vectorizer + VectorStore`
-10. Update `indexer/cli.py` — `--index-store` option
-11. Create `indexer/tests/stubs/index_store.py`; delete `vector_store.py`, `vectorizer.py`
-12. Update `indexer/tests/test_runner.py`, `test_runner_update.py`
-13. Run indexer dev loop
+8. Create `indexer/src/indexer/stores/chroma_caption.py` (`ChromaCaptionIndexStore`)
+9. Thin `indexer/pointer.py` to re-exports from `common.media`
+10. Update `indexer/runner.py` — `IndexStore` replaces `Vectorizer + VectorStore`
+11. Update `indexer/cli.py` — `--index-store` option
+12. Create `indexer/tests/stubs/index_store.py`; delete `vector_store.py`, `vectorizer.py`
+13. Create `indexer/tests/test_chroma_caption_store.py` (moved from common)
+14. Update `indexer/tests/test_runner.py`, `test_runner_update.py`
+15. Run indexer dev loop
 
 ### Phase C — search
-14. Update `search/startup.py` (new `AppState` fields)
-15. Update `search/app.py` (`search()` + `getmedia()`)
-16. Update `search/plugins.py` (`resolve_index_store`)
-17. Update `search/config.py` (split validator)
-18. Create `search/tests/stubs/index_store.py`; delete `vector_store.py`
-19. Update `search/tests/conftest.py`, `test_startup.py`, `test_search_route.py`
-20. Run search dev loop
+16. Update `search/startup.py` (new `AppState` fields)
+17. Update `search/app.py` (`search()` + `getmedia()`)
+18. Update `search/plugins.py` (`resolve_index_store`)
+19. Update `search/config.py` (split validator)
+20. Create `search/tests/stubs/index_store.py`; delete `vector_store.py`
+21. Update `search/tests/conftest.py`, `test_startup.py`, `test_search_route.py`
+22. Run search dev loop
 
 ### Phase D — push
-21. Commit (one commit per phase or combined)
-22. Push to `claude/media-pointer-navigation-SXQPT`
+23. Commit (one commit per phase or combined)
+24. Push to `claude/media-pointer-navigation-SXQPT`
 
 ---
 
