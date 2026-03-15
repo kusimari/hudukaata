@@ -61,10 +61,10 @@ def _make_run_args(
     folder: str | None = None,
     checkpoint_interval: int = 0,
 ) -> dict:
-    from indexer.pointer import MediaPointer
+    from common.media import FileMediaSource
 
     return dict(
-        media=MediaPointer(scheme="file", remote=None, path=str(media_path)),
+        media=FileMediaSource(path=str(media_path)),
         store=_store(store_path),
         caption_model=caption_model or StubCaptionModel(),
         index_store=index_store or StubIndexStore(),

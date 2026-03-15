@@ -12,7 +12,6 @@ from common.media import MediaSource
 
 from indexer.models.base import CaptionModel
 from indexer.models.blip2 import Blip2CaptionModel
-from indexer.pointer import MediaPointer
 from indexer.runner import run
 from indexer.stores.chroma_caption import ChromaCaptionIndexStore
 
@@ -75,7 +74,7 @@ def index(
     """Index media files from MEDIA pointer into STORE."""
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
 
-    media_src: MediaSource = MediaPointer.parse(media)
+    media_src: MediaSource = MediaSource.from_uri(media)
     store_ptr = StorePointer.parse(store)
 
     try:

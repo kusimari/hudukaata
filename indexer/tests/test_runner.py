@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 from common.base import IndexMeta, StorePointer
+from common.media import FileMediaSource
 
-from indexer.pointer import MediaPointer
 from indexer.runner import run
 from indexer.stores.chroma_caption import ChromaCaptionIndexStore
 from tests.stubs.caption_model import StubCaptionModel
@@ -25,8 +25,8 @@ def _require_vectorizer_model() -> None:
         pytest.skip(f"sentence-transformers model unavailable: {exc}")
 
 
-def _media(path: Path) -> MediaPointer:
-    return MediaPointer(scheme="file", remote=None, path=str(path))
+def _media(path: Path) -> FileMediaSource:
+    return FileMediaSource(path=str(path))
 
 
 def _store(path: Path) -> StorePointer:
