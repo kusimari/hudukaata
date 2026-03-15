@@ -91,8 +91,7 @@ def write_conf(path: Path, folder: str = "") -> None:
         f"media           = file://{MEDIA_DIR}",
         f"store           = file://{STORE_DIR}",
         "caption_model   = blip2",
-        "vectorizer      = sentence-transformer",
-        "vector_store    = chroma",
+        "index_store     = indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         "log_level       = INFO",
         f"search_port     = {SEARCH_PORT}",
         "search_api_host = http://localhost",
@@ -128,8 +127,8 @@ def wait_until_ready(url: str, label: str, proc: subprocess.Popen, timeout: int 
 @contextmanager
 def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
     """Start search API and webapp, yield an httpx client, stop both on exit."""
-    search_log = Path("/tmp/hudukaata-search.log")
-    webapp_log = Path("/tmp/hudukaata-webapp.log")
+    search_log = WORK_DIR / "search.log"
+    webapp_log = WORK_DIR / "webapp.log"
     procs: list[subprocess.Popen] = []
 
     try:
