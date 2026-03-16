@@ -315,6 +315,47 @@ Do **NOT** merge — leave that for the human reviewer.
 
 ---
 
+### Squash merge summary
+
+When the human asks for a squash merge summary, compose it from the structured
+commit messages already in the branch — do not re-read the diff.
+
+```bash
+git log --format="%h %s" $(git merge-base HEAD main)..HEAD
+```
+
+Collect the commits in order:
+
+| Prefix | Used for |
+|---|---|
+| `plan:` | Goal and architectural decisions |
+| `dev:` | Files created/modified and design choices |
+| `review:` | Quality score and findings |
+| `fixes:` | How each finding was resolved |
+| Any other `fix:`/`docs:`/`style:` commits | Include as a one-liner under "Additional fixes" |
+
+Write the summary in this structure:
+
+```
+<feature title from plan: subject>
+
+## What changed
+<2–4 bullet points drawn from dev: body — files, key design decisions>
+
+## Why
+<goal paragraph from plan: body>
+
+## Review findings resolved
+<finding resolution lines from fixes: body; omit deferred items or note them>
+
+## Quality gate
+<score line from review: subject, e.g. "Score 85/100 PASS">
+```
+
+Keep the total under ~40 lines. Omit sections that have no content.
+
+---
+
 ## Notes on testing
 
 - No real models, no GPU, no rclone in Python tests — use stubs/mocks only.
