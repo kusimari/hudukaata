@@ -293,3 +293,41 @@ def run(
         index_store_name=index_store_name,
         folder=folder,
     )
+
+
+def _run(
+    media: MediaSource,
+    store: StorePointer,
+    caption_model: CaptionModel,
+    index_store: IndexStore,
+    local_tmp: Path,
+    index_store_name: str,
+    folder: str | None = None,
+    checkpoint_interval: int = 0,
+    initial_batch_size: int = 1,
+    max_batch_size: int = 32,
+    adaptive_batch: bool = True,
+) -> None:
+    """Internal entry point used by tests; accepts *local_tmp* explicitly."""
+    indexer = Blip2SentTokExifChromaIndexer(
+        caption_model=caption_model,
+        index_store=index_store,
+    )
+    ctrl = AdaptiveBatchController(
+        initial_size=initial_batch_size,
+        max_size=max_batch_size,
+        adaptive=adaptive_batch,
+    )
+    runner = IndexingRunner(
+        pipeline_runner=AdaptiveBatchRunner(ctrl),
+        checkpoint_interval=checkpoint_interval,
+    )
+    runner.run(
+        pipeline=indexer.pipeline(),
+        media=media,
+        store=store,
+        index_store=index_store,
+        index_store_name=index_store_name,
+        local_tmp=local_tmp,
+        folder=folder,
+    )
