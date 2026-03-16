@@ -101,7 +101,7 @@ def _build_blip2(config: Blip2SentTokExifChromaConfig) -> None:
         media=MediaSource.from_uri(config.media_uri),
         store=StorePointer.parse(config.store_uri),
         index_store=idx_store,
-        index_store_name="blip2_sentok_exif_chroma",
+        index_store_name="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         folder=config.folder,
     )
 
