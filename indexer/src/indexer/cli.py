@@ -27,6 +27,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -71,12 +72,6 @@ class Blip2SentTokExifChromaConfig:
 # Registry: indexer key → (config class, builder function)
 # ---------------------------------------------------------------------------
 
-_STORES: dict[str, type[IndexStore]] = {
-    "blip2_sentok_exif_chroma": __import__(
-        "indexer.stores.chroma_caption", fromlist=["ChromaCaptionIndexStore"]
-    ).ChromaCaptionIndexStore,
-}
-
 
 def _build_blip2(config: Blip2SentTokExifChromaConfig) -> None:
     """Build and run the Blip2SentTokExifChromaIndexer pipeline."""
@@ -111,7 +106,9 @@ def _build_blip2(config: Blip2SentTokExifChromaConfig) -> None:
     )
 
 
-_REGISTRY: dict[str, Any] = {
+_RegistryEntry = tuple[type[Any], Callable[[Any], None]]
+
+_REGISTRY: dict[str, _RegistryEntry] = {
     "blip2_sentok_exif_chroma": (Blip2SentTokExifChromaConfig, _build_blip2),
 }
 

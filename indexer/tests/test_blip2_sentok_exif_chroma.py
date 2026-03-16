@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from common.media import MediaFile
@@ -22,7 +21,6 @@ def _mock_mf(path: str = "a.jpg", mtime: float | None = 1234.0) -> MagicMock:
     mf.relative_path = path
     mf.mtime = mtime
     mf.media_type = "image"
-    mf.local_path = Path("/tmp") / path
     return mf
 
 
@@ -146,10 +144,13 @@ class TestExifStage:
 
     def test_exif_failure_logs_and_continues(self) -> None:
         item = _item()
-        with patch(
-            "indexer.indexers.blip2_sentok_exif_chroma.extract_exif",
-            side_effect=RuntimeError("bad"),
-        ), patch("indexer.indexers.blip2_sentok_exif_chroma.logger") as mock_log:
+        with (
+            patch(
+                "indexer.indexers.blip2_sentok_exif_chroma.extract_exif",
+                side_effect=RuntimeError("bad"),
+            ),
+            patch("indexer.indexers.blip2_sentok_exif_chroma.logger") as mock_log,
+        ):
             result = _indexer()._exif([item])
         assert result == [item]
         mock_log.warning.assert_called_once()

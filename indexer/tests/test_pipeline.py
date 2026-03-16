@@ -265,3 +265,30 @@ class TestAdaptiveBatchRunnerOOM:
         runner = AdaptiveBatchRunner(_fixed_ctrl(size=1))
         with pytest.raises(RuntimeError, match="unrelated error"):
             list(runner.stream([Stage(bad, batched=True)], [_item()]))
+
+    def test_oom_retry_skips_item_that_raises_and_continues(self) -> None:
+        """During OOM one-by-one retry, an item that raises is logged+dropped;
+        the remaining items in the batch still complete successfully."""
+        call_count = 0
+
+        def stage(items: list[BatchItem]) -> list[BatchItem]:
+            nonlocal call_count
+            call_count += 1
+            # First call (full batch) triggers OOM
+            if len(items) > 1:
+                raise MemoryError("out of memory")
+            # Second call (a.jpg during retry) raises a non-OOM error
+            if items[0].media_file.relative_path == "a.jpg":
+                raise ValueError("bad item a")
+            return items
+
+        ctrl = AdaptiveBatchController(initial_size=2, max_size=2, adaptive=False)
+        runner = AdaptiveBatchRunner(ctrl)
+        items = [_item("a.jpg"), _item("b.jpg")]
+
+        with patch("indexer.pipeline.logger"):
+            result = list(runner.stream([Stage(stage, batched=True)], items))
+
+        # a.jpg dropped, b.jpg survives
+        assert len(result) == 1
+        assert result[0].media_file.relative_path == "b.jpg"

@@ -22,7 +22,6 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass, field
-from typing import Any
 
 from common.media import MediaFile
 
@@ -46,7 +45,7 @@ class Stage:
     item.
     """
 
-    fn: Callable[[list[Any]], list[Any]]
+    fn: Callable[[list[BatchItem]], list[BatchItem]]
     batched: bool = False
 
 
@@ -89,7 +88,12 @@ class OneByOneRunner:
         pipeline: Pipeline,
         source: Iterable[BatchItem],
     ) -> Iterator[BatchItem]:
-        """Yield each :class:`BatchItem` after it has passed all stages."""
+        """Yield each :class:`BatchItem` after it has passed all stages.
+
+        ``stage.batched`` is intentionally ignored — every stage receives a
+        single-element list regardless of the flag.  This is the correct
+        behaviour for the OOM fallback and for testing individual stages.
+        """
         s: Iterator[BatchItem] = iter(source)
         for stage in pipeline:
             s = self._each(stage.fn, s)
@@ -114,7 +118,7 @@ class OneByOneRunner:
 
 def _is_oom(exc: BaseException) -> bool:
     msg = str(exc).lower()
-    return isinstance(exc, MemoryError) or "out of memory" in msg or "cuda" in msg
+    return isinstance(exc, MemoryError) or "out of memory" in msg
 
 
 class AdaptiveBatchRunner:
@@ -180,5 +184,15 @@ class AdaptiveBatchRunner:
             if _is_oom(exc):
                 logger.warning("OOM during batch of %d; retrying one-by-one. (%s)", len(buf), exc)
                 self._ctrl.on_oom()
-                return [r for item in buf for r in fn([item])]
+                results: list[BatchItem] = []
+                for item in buf:
+                    try:
+                        results.extend(fn([item]))
+                    except Exception as retry_exc:
+                        logger.warning(
+                            "Stage dropped item %s after OOM retry: %s",
+                            item.media_file.relative_path,
+                            retry_exc,
+                        )
+                return results
             raise

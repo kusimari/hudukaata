@@ -70,7 +70,7 @@ class Blip2SentTokExifChromaIndexer:
             for item in items:
                 item._stack.close()
             return []
-        for item, caption in zip(items, captions, strict=False):
+        for item, caption in zip(items, captions, strict=True):
             item.caption = caption
         return items
 
