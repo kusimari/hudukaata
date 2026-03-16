@@ -2,31 +2,48 @@
 
 ## Purpose
 
-This prompt is used for **whole-diff PR reviews** — after the implementation is
-complete and committed. It differs from `review-prompt.md` (which is run
-incrementally during development) in scope: it asks structural questions about
-the whole change, not just per-hunk quality.
+Used for **whole-diff PR reviews** after implementation is complete and committed.
+Differs from `review-prompt.md` (incremental, per-hunk) in scope: asks structural
+questions about the whole change, not just per-hunk quality.
+
+## Baseline standard
+
+Follow [Google Engineering Practices — What to Look for in a Code Review](https://github.com/google/eng-practices/blob/master/review/reviewer/looking-for.md).
+At PR level pay special attention to: design, complexity, over-engineering, and
+test strategy across the whole change.
 
 ## Project context
 
-You are reviewing a pull request to **hudukaata** — a Python/TypeScript monorepo
-that indexes media files (images, video, audio) for semantic search and serves
-results to a browser SPA.
+**hudukaata** — a monorepo that indexes media files for semantic search and serves
+results to a browser SPA. Packages: `common` (shared Python), `indexer` (Python),
+`search` (FastAPI, Python), `webapp` (React + TypeScript).
 
-Key constraints:
-- Runs on **resource-constrained hardware** (limited RAM, consumer GPU or CPU-only).
-- The **indexer** processes files through a functional pipeline of stages. Each stage
-  is `list[T] → list[T]` with a `batched: bool` attribute.
-- **No real models, GPU, or rclone in tests** — stubs only.
-- Quality gate: `ruff` + `mypy --strict`. Type errors or ruff violations are High.
-- Packages: `common` (shared), `indexer`, `search`, `webapp`.
+Read `.kdevkit/project.md` for quality gate thresholds and tech stack details.
+
+### Quality tooling
+
+| Package | Formatter / linter | Type checker |
+|---|---|---|
+| `common`, `indexer`, `search` | `ruff` | `mypy --strict` |
+| `webapp` | (ESLint if configured) | `tsc --noEmit` (strict) |
+
+### Per-package constraints
+
+| Package | Additional constraints |
+|---|---|
+| `common` | Abstract base classes and interfaces only — no concrete implementations. |
+| `indexer` | Each pipeline stage must be a callable `list[T] → list[U]` with a `batched: bool` attribute. No real models, GPU, or rclone in tests — stubs only. OOM must not corrupt the store. |
+| `search` | FastAPI routers only; no business logic in route handlers. |
+| `webapp` | All API calls through the typed service layer; no raw `fetch` in components. |
+
+Apply only the row(s) matching the package(s) touched by this PR.
 
 ---
 
 ## Severity definitions
 
-**High** — would cause a bug, data loss, resource exhaustion, CI failure, or type
-error in production. Fix before merging.
+**High** — would cause a bug, data loss, resource exhaustion, CI failure, or a type
+error reachable in production. Fix before merging.
 
 **Medium** — degrades maintainability, test coverage, or readability in a meaningful
 way. Should be addressed but won't block merge.
@@ -44,59 +61,57 @@ way. Should be addressed but won't block merge.
 
 ### 2. Structural simplicity
 - Are there unnecessary files, layers, or abstractions?
-- Does each new module have a single clear responsibility?
+- Does each new module have a single, clear responsibility?
 - Are there classes or functions used only once that could be inlined?
 - Are there modules that should be merged?
 
 ### 3. Over-engineering
-- Are there abstractions designed for hypothetical future requirements?
-- Is there configuration for cases that don't exist yet?
-- Are there three or fewer similar lines that were unnecessarily abstracted?
-- Are there extension points (base classes, protocols, registries) with only one
-  implementation?
+- Abstractions designed for hypothetical future requirements?
+- Configuration or extension points (protocols, registries, feature flags) with
+  only one implementation?
+- Three similar lines that were unnecessarily abstracted into a helper?
+- Future-proofing that adds complexity without present value?
 
 ### 4. Public API surface
 - Is the public API minimal and stable?
-- Are internals properly private (`_` prefix or module-private)?
-- Are callers forced to know implementation details they shouldn't need to?
+- Internals properly private (`_` prefix in Python, unexported in TypeScript)?
+- Are callers forced to know implementation details they shouldn't need?
 
-### 5. Memory safety
-- Are there unbounded collections or caches without size limits?
-- Are objects retained longer than necessary (e.g. large tensors, open file handles)?
-- On OOM: is recovery clean, or is there partially-processed state that could
-  corrupt downstream stores?
-- Are large intermediate objects (image buffers, tensor batches) discarded promptly?
-
-### 6. Performance
-- Are there redundant passes over data (e.g. two `for` loops where one would do)?
-- Are batching opportunities missed (e.g. calling a model once per item when
-  `batch_size` items could be processed together)?
-- Are there unnecessary copies of large data structures?
-
-### 7. Data flow coherence
+### 5. Data flow coherence
 - Is the end-to-end data flow legible without reading every function body?
-- Can you trace a single item from source to sink in under 5 minutes?
-- Are there surprising side-effects that violate the functional pipeline contract?
+- Can you trace a single item from source to sink in under five minutes?
+- Are there surprising side-effects or hidden state mutations?
+
+### 6. Resource safety (whole-diff view)
+- Any unbounded collections or caches without size limits across the whole change?
+- Objects (file handles, connections, large buffers) retained longer than needed?
+- On error: is cleanup guaranteed, or is there partially-processed state that
+  could corrupt downstream stores?
+
+### 7. Performance
+- Redundant passes over data (two loops where one would do)?
+- Batching opportunities missed?
+- Unnecessary copies of large data structures?
 
 ### 8. Test strategy
-- Are tests at the right level (unit for pure logic, integration for orchestration)?
-- Do tests assert on contracts (inputs/outputs) rather than internals (call counts,
-  private state)?
-- Does the test suite cover the new happy path, at least one error path, and at
-  least one edge case (empty input, single item, OOM)?
-- Are stub implementations faithful enough to catch real bugs, or do they hide them?
+- Tests at the right level: unit for pure logic, integration for orchestration.
+- Tests assert on contracts (inputs/outputs), not internals (private state,
+  call counts).
+- The suite covers: happy path, at least one error path, at least one edge case
+  (empty input, single item).
+- Stubs / mocks faithful enough to catch real bugs.
 
 ### 9. Correctness and edge cases
-(Same as `review-prompt.md` criteria 1–4 — recheck at PR level.)
-- Empty input to every stage?
-- Partial batch flush (tail items after the last full batch)?
-- Context managers closed on all exit paths?
-- Per-item error isolation (one bad file doesn't kill the whole batch)?
+*(Recheck at PR level — same as `review-prompt.md` criteria 1–3.)*
+- Empty input to every entry point?
+- Tail / partial flush handled?
+- All exit paths (normal and exception) correct?
+- Per-item error isolation?
 
-### 10. Type annotations and import hygiene
-(Same as `review-prompt.md` criteria 5 and 10 — recheck at PR level.)
-- All new code annotated; no new `Any` without comment.
-- No unused imports; no new dependencies without `pyproject.toml` update.
+### 10. Type safety and dependency hygiene
+*(Recheck at PR level — same as `review-prompt.md` criteria 4 and 9.)*
+- All new code typed; no new untyped `any` / `Any` without comment.
+- No unused imports; no new dependencies without manifest update.
 
 ---
 
