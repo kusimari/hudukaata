@@ -130,12 +130,14 @@ class TestIncrementalSkip:
         db_dir = store_dir / "db"
         db_dir.mkdir()
         db_dir.joinpath("index_meta.json").write_text(
-            json.dumps({
-                "indexer_version": INDEXER_VERSION,
-                "source": "file:///media",
-                "index_store": "stub",
-                "indexed_at": "2025-01-01T00:00:00+00:00",
-            })
+            json.dumps(
+                {
+                    "indexer_version": INDEXER_VERSION,
+                    "source": "file:///media",
+                    "index_store": "stub",
+                    "indexed_at": "2025-01-01T00:00:00+00:00",
+                }
+            )
         )
 
         # Pre-populate index with a matching mtime
