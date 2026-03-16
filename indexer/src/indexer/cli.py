@@ -1,27 +1,123 @@
-"""Click CLI entry point for the indexer."""
+"""Click CLI entry point for the indexer.
+
+The ``index`` command accepts a single JSON config file.  The ``indexer``
+field in the JSON selects which indexer class to use; the rest of the fields
+are passed to the indexer-specific config dataclass.
+
+Example config (blip2_sentok_exif_chroma):
+
+.. code-block:: json
+
+    {
+        "indexer": "blip2_sentok_exif_chroma",
+        "media_uri": "file:///media",
+        "store_uri": "file:///store",
+        "folder": null,
+        "initial_batch_size": 1,
+        "max_batch_size": 32,
+        "adaptive_batch": true,
+        "checkpoint_interval": 0,
+        "load_in_8bit": false,
+        "log_level": "INFO"
+    }
+"""
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import logging
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import click
-from common.base import StorePointer, resolve_instance
+from common.base import StorePointer
 from common.index import IndexStore
 from common.media import MediaSource
 
+from indexer.batch import AdaptiveBatchController
+from indexer.indexers.blip2_sentok_exif_chroma import Blip2SentTokExifChromaIndexer
 from indexer.models.base import CaptionModel
-from indexer.models.blip2 import Blip2CaptionModel
-from indexer.runner import run
-from indexer.stores.chroma_caption import ChromaCaptionIndexStore
+from indexer.pipeline import AdaptiveBatchRunner
+from indexer.runner import IndexingRunner
 
-_CAPTION_MODELS: dict[str, type[Any]] = {
-    "blip2": Blip2CaptionModel,
+# ---------------------------------------------------------------------------
+# Config dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Blip2SentTokExifChromaConfig:
+    """Configuration for the caption-based indexer."""
+
+    media_uri: str = ""
+    store_uri: str = ""
+    folder: str | None = None
+    initial_batch_size: int = 1
+    max_batch_size: int = 32
+    adaptive_batch: bool = True
+    checkpoint_interval: int = 0
+    load_in_8bit: bool = False
+    log_level: str = "INFO"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Blip2SentTokExifChromaConfig:
+        known = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+# ---------------------------------------------------------------------------
+# Registry: indexer key → (config class, builder function)
+# ---------------------------------------------------------------------------
+
+_STORES: dict[str, type[IndexStore]] = {
+    "blip2_sentok_exif_chroma": __import__(
+        "indexer.stores.chroma_caption", fromlist=["ChromaCaptionIndexStore"]
+    ).ChromaCaptionIndexStore,
 }
 
-_INDEX_STORES: dict[str, type[Any]] = {
-    "chroma-caption": ChromaCaptionIndexStore,
+
+def _build_blip2(config: Blip2SentTokExifChromaConfig) -> None:
+    """Build and run the Blip2SentTokExifChromaIndexer pipeline."""
+    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
+
+    from indexer.models.blip2 import Blip2CaptionModel
+    from indexer.stores.chroma_caption import ChromaCaptionIndexStore
+
+    caption_model: CaptionModel = Blip2CaptionModel(load_in_8bit=config.load_in_8bit)
+    idx_store: IndexStore = ChromaCaptionIndexStore()
+
+    indexer = Blip2SentTokExifChromaIndexer(
+        caption_model=caption_model,
+        index_store=idx_store,
+    )
+    ctrl = AdaptiveBatchController(
+        initial_size=config.initial_batch_size,
+        max_size=config.max_batch_size,
+        adaptive=config.adaptive_batch,
+    )
+    runner = IndexingRunner(
+        pipeline_runner=AdaptiveBatchRunner(ctrl),
+        checkpoint_interval=config.checkpoint_interval,
+    )
+    runner.run(
+        pipeline=indexer.pipeline(),
+        media=MediaSource.from_uri(config.media_uri),
+        store=StorePointer.parse(config.store_uri),
+        index_store=idx_store,
+        index_store_name="blip2_sentok_exif_chroma",
+        folder=config.folder,
+    )
+
+
+_REGISTRY: dict[str, Any] = {
+    "blip2_sentok_exif_chroma": (Blip2SentTokExifChromaConfig, _build_blip2),
 }
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
 @click.group()
@@ -30,66 +126,43 @@ def main() -> None:
 
 
 @main.command()
-@click.option(
-    "--media", required=True, help="Media directory pointer (file:// or rclone:remote:///path)."
-)
-@click.option(
-    "--store", required=True, help="Store directory pointer (file:// or rclone:remote:///path)."
-)
-@click.option(
-    "--caption-model",
-    "caption_model_name",
-    default="blip2",
-    show_default=True,
-    help="Captioner class to use (short name or dotted import path).",
-)
+@click.argument("config_file", type=click.Path(exists=True, path_type=Path))
+def index(config_file: Path) -> None:
+    """Index media files using the configuration in CONFIG_FILE (JSON)."""
+    raw: dict[str, Any] = json.loads(config_file.read_text())
+    indexer_key = raw.get("indexer", "")
+    if indexer_key not in _REGISTRY:
+        raise click.BadParameter(
+            f"Unknown indexer {indexer_key!r}. Available: {', '.join(sorted(_REGISTRY))}",
+            param_hint="indexer",
+        )
+    cfg_cls, build_fn = _REGISTRY[indexer_key]
+    config = cfg_cls.from_dict({k: v for k, v in raw.items() if k != "indexer"})
+    build_fn(config)
+
+
+# ---------------------------------------------------------------------------
+# Legacy flags entry point (kept for backwards compatibility with old scripts)
+# ---------------------------------------------------------------------------
+
+
+@main.command(name="index-legacy", hidden=True)
+@click.option("--media", required=True)
+@click.option("--store", required=True)
+@click.option("--caption-model", "caption_model_name", default="blip2")
 @click.option(
     "--index-store",
     "index_store_name",
     default="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
-    show_default=True,
-    help="IndexStore class to use (short name or dotted import path).",
 )
-@click.option(
-    "--folder",
-    default=None,
-    help="Subfolder within the media source to process (enables incremental batching).",
-)
-@click.option(
-    "--checkpoint-interval",
-    default=0,
-    show_default=True,
-    help=("Write a checkpoint every N files (0 = after every batch, -1 = disabled)."),
-)
-@click.option(
-    "--initial-batch-size",
-    default=1,
-    show_default=True,
-    help="Number of files to process in the first batch.",
-)
-@click.option(
-    "--max-batch-size",
-    default=32,
-    show_default=True,
-    help="Upper bound on adaptive batch size.",
-)
-@click.option(
-    "--adaptive-batch/--no-adaptive-batch",
-    default=True,
-    show_default=True,
-    help="Grow/shrink batch size based on measured throughput and available RAM.",
-)
-@click.option(
-    "--load-in-8bit/--no-load-in-8bit",
-    default=False,
-    show_default=True,
-    help=(
-        "Load BLIP-2 in 8-bit quantisation (requires bitsandbytes). "
-        "Halves VRAM with negligible quality impact."
-    ),
-)
-@click.option("--log-level", default="INFO", show_default=True, help="Logging level.")
-def index(
+@click.option("--folder", default=None)
+@click.option("--checkpoint-interval", default=0)
+@click.option("--initial-batch-size", default=1)
+@click.option("--max-batch-size", default=32)
+@click.option("--adaptive-batch/--no-adaptive-batch", default=True)
+@click.option("--load-in-8bit/--no-load-in-8bit", default=False)
+@click.option("--log-level", default="INFO")
+def index_legacy(
     media: str,
     store: str,
     caption_model_name: str,
@@ -102,29 +175,19 @@ def index(
     load_in_8bit: bool,
     log_level: str,
 ) -> None:
-    """Index media files from MEDIA pointer into STORE."""
+    """Legacy flags-based indexing (deprecated — use ``index CONFIG_FILE``)."""
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
 
-    media_src: MediaSource = MediaSource.from_uri(media)
-    store_ptr = StorePointer.parse(store)
+    from indexer.models.blip2 import Blip2CaptionModel
+    from indexer.runner import run
+    from indexer.stores.chroma_caption import ChromaCaptionIndexStore
 
-    try:
-        # Blip2CaptionModel is constructed directly so --load-in-8bit can be forwarded.
-        if caption_model_name == "blip2":
-            caption_model: CaptionModel = Blip2CaptionModel(load_in_8bit=load_in_8bit)
-        else:
-            caption_model = resolve_instance(
-                caption_model_name, _CAPTION_MODELS, "caption-model", CaptionModel
-            )
-        idx_store: IndexStore = resolve_instance(
-            index_store_name, _INDEX_STORES, "index-store", IndexStore
-        )
-    except ValueError as exc:
-        raise click.BadParameter(str(exc)) from exc
+    caption_model: CaptionModel = Blip2CaptionModel(load_in_8bit=load_in_8bit)
+    idx_store: IndexStore = ChromaCaptionIndexStore()
 
     run(
-        media_src,
-        store_ptr,
+        MediaSource.from_uri(media),
+        StorePointer.parse(store),
         caption_model,
         idx_store,
         index_store_name=index_store_name,
