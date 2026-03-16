@@ -91,7 +91,6 @@ def write_conf(path: Path, folder: str = "") -> None:
         f"media           = file://{MEDIA_DIR}",
         f"store           = file://{STORE_DIR}",
         "caption_model   = blip2",
-        "index_store     = indexer.stores.chroma_caption.ChromaCaptionIndexStore",
         "log_level       = INFO",
         f"search_port     = {SEARCH_PORT}",
         "search_api_host = http://localhost",
