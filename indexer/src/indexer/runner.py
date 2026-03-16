@@ -322,12 +322,13 @@ def _run(
         pipeline_runner=AdaptiveBatchRunner(ctrl),
         checkpoint_interval=checkpoint_interval,
     )
-    runner.run(
-        pipeline=indexer.pipeline(),
-        media=media,
-        store=store,
-        index_store=index_store,
-        index_store_name=index_store_name,
-        local_tmp=local_tmp,
-        folder=folder,
+    cleanup_stale_tmp(store)
+    runner._execute(
+        indexer.pipeline(),
+        media,
+        store,
+        index_store,
+        local_tmp,
+        index_store_name,
+        folder,
     )
