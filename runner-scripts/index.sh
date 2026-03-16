@@ -27,7 +27,6 @@ cfg() {
 MEDIA=$(cfg media)
 STORE=$(cfg store)
 CAPTION=$(cfg caption_model blip2)
-INDEX_STORE=$(cfg index_store indexer.stores.chroma_caption.ChromaCaptionIndexStore)
 LOG=$(cfg log_level INFO)
 FOLDER=$(cfg folder "")
 CHECKPOINT=$(cfg checkpoint_interval "")
@@ -37,33 +36,53 @@ if [ -z "$MEDIA" ] || [ -z "$STORE" ]; then
   exit 1
 fi
 
+# Map caption_model name to the indexer registry key used by `indexer index`.
+case "$CAPTION" in
+  blip2) INDEXER_KEY="blip2_sentok_exif_chroma" ;;
+  *)
+    echo "ERROR: unknown caption_model '$CAPTION' — supported values: blip2" >&2
+    exit 1
+    ;;
+esac
+
 echo "==> Indexing media"
 echo "    media  : $MEDIA"
 echo "    store  : $STORE"
-echo "    model  : $CAPTION"
+echo "    model  : $CAPTION  ($INDEXER_KEY)"
 [ -n "$FOLDER" ] && echo "    folder : $FOLDER"
 echo ""
 
-# Pass optional parameters via environment variables so that values with shell
-# metacharacters are never interpolated inside a bash -c string.
+# Build a JSON config file for `indexer index`.  Use Python for correct
+# JSON encoding so that paths with special characters are handled safely.
+TMP_JSON=$(mktemp /tmp/hudukaata-indexer-XXXXXX.json)
+trap 'rm -f "$TMP_JSON"' EXIT
+
 export _IDX_MEDIA="$MEDIA"
 export _IDX_STORE="$STORE"
-export _IDX_CAPTION="$CAPTION"
-export _IDX_INDEX_STORE="$INDEX_STORE"
+export _IDX_INDEXER_KEY="$INDEXER_KEY"
 export _IDX_LOG="$LOG"
 export _IDX_FOLDER="$FOLDER"
 export _IDX_CHECKPOINT="$CHECKPOINT"
+export TMP_JSON
+
+python3 - <<'PYEOF'
+import json, os
+
+folder = os.environ.get("_IDX_FOLDER") or None
+checkpoint_raw = os.environ.get("_IDX_CHECKPOINT", "")
+config = {
+    "indexer": os.environ["_IDX_INDEXER_KEY"],
+    "media_uri": os.environ["_IDX_MEDIA"],
+    "store_uri": os.environ["_IDX_STORE"],
+    "folder": folder,
+    "checkpoint_interval": int(checkpoint_raw) if checkpoint_raw else 0,
+    "log_level": os.environ["_IDX_LOG"],
+}
+with open(os.environ["TMP_JSON"], "w") as f:
+    json.dump(config, f, indent=2)
+PYEOF
 
 nix develop "$REPO#indexer" --command bash -c '
   cd "$REPO/indexer"
-  EXTRA_ARGS=()
-  [ -n "$_IDX_FOLDER" ]     && EXTRA_ARGS+=(--folder "$_IDX_FOLDER")
-  [ -n "$_IDX_CHECKPOINT" ] && EXTRA_ARGS+=(--checkpoint-interval "$_IDX_CHECKPOINT")
-  indexer index \
-    --media        "$_IDX_MEDIA" \
-    --store        "$_IDX_STORE" \
-    --caption-model "$_IDX_CAPTION" \
-    --index-store  "$_IDX_INDEX_STORE" \
-    --log-level    "$_IDX_LOG" \
-    "${EXTRA_ARGS[@]}"
+  indexer index "$TMP_JSON"
 '
