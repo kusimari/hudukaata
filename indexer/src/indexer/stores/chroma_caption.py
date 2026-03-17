@@ -139,6 +139,16 @@ class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
         import chromadb
         from chromadb.config import Settings
 
+        # Detect old layout (pre-3.0.0): ChromaDB data was stored directly in
+        # local_path instead of local_path/captions/.  A chroma.sqlite3 file at
+        # the root is the tell-tale sign.
+        if (local_path / "chroma.sqlite3").exists() and not (local_path / _SUB_DIR).exists():
+            raise RuntimeError(
+                f"Index at {local_path} uses the old pre-3.0.0 layout "
+                f"(ChromaDB data at root instead of {local_path / _SUB_DIR}). "
+                "Re-run the indexer to rebuild the index with the current layout."
+            )
+
         self._client = chromadb.PersistentClient(
             path=str(local_path / _SUB_DIR),
             settings=Settings(anonymized_telemetry=False),

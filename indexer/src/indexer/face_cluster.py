@@ -13,6 +13,7 @@ has initialised the face store.
 
 from __future__ import annotations
 
+import logging
 import math
 import uuid
 from typing import TYPE_CHECKING
@@ -21,6 +22,8 @@ from common.index import FaceItem
 
 if TYPE_CHECKING:
     from indexer.stores.chroma_face import ChromaFaceIndexStore
+
+logger = logging.getLogger(__name__)
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:
@@ -40,15 +43,22 @@ class FaceClusterer:
         face_store: Backing store that persists cluster centroids and metadata.
         threshold: Cosine similarity above which a face is merged into an
             existing cluster.  Typical range: 0.5–0.8.
+        max_clusters: Maximum number of existing clusters to load on the first
+            :meth:`assign` call.  A warning is logged if the store contains
+            more clusters than this limit, as nearest-neighbour quality degrades
+            when clusters are silently truncated.  Increase or set to a very
+            large value for collections with many distinct faces.
     """
 
     def __init__(
         self,
         face_store: ChromaFaceIndexStore,
         threshold: float = 0.6,
+        max_clusters: int = 100_000,
     ) -> None:
         self._store = face_store
         self._threshold = threshold
+        self._max_clusters = max_clusters
         # None = not yet loaded from store; loaded lazily on first assign().
         # Mapping: cluster_id → (centroid, count, image_paths)
         self._clusters: dict[str, tuple[list[float], int, list[str]]] | None = None
@@ -86,7 +96,15 @@ class FaceClusterer:
     def _load_existing(self) -> None:
         """Load existing cluster centroids from the face store into memory."""
         self._clusters = {}
-        for r in self._store.list_all(top_k=100_000):
+        loaded = self._store.list_all(top_k=self._max_clusters)
+        if len(loaded) == self._max_clusters:
+            logger.warning(
+                "FaceClusterer: loaded exactly %d clusters (the max_clusters cap). "
+                "If the store contains more clusters, nearest-neighbour quality may be "
+                "degraded.  Increase max_clusters to load all clusters.",
+                self._max_clusters,
+            )
+        for r in loaded:
             image_paths_str = r.extra.get("image_paths", "")
             image_paths = [p for p in image_paths_str.split(",") if p]
             count = int(r.extra.get("count", "1"))

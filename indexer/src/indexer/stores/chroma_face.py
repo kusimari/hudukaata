@@ -21,7 +21,7 @@ from typing import Any
 
 from common.index import FaceItem, IndexResult, IndexStore
 
-_META_FILE = "db_meta.json"
+_META_FILE = "face_db_meta.json"
 _COLLECTION_NAME = "faces"
 _SUB_DIR = "faces"
 
@@ -230,15 +230,13 @@ class ChromaFaceIndexStore(IndexStore[FaceItem]):
                 shutil.rmtree(dest)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(tmp_dir / _SUB_DIR), str(dest))
+            (local_path / _META_FILE).write_text(json.dumps({"created_at": created_ts}))
         except Exception:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
-        finally:
-            _ = created_ts  # used above; suppress unused warning
 
     def created_at(self, local_path: Path) -> datetime | None:
-        # Delegate to the shared db_meta.json written by ChromaCaptionIndexStore.
-        meta_path = local_path / "db_meta.json"
+        meta_path = local_path / _META_FILE
         if not meta_path.exists():
             return None
         try:

@@ -140,9 +140,10 @@ class IndexingRunner:
         index_store.save(db_new_path)
         face_store_name: str | None = None
         if secondary_stores:
-            for sec_store, sec_name in secondary_stores:
+            # Currently only one secondary store (face store) is supported.
+            face_store_name = secondary_stores[0][1]
+            for sec_store, _ in secondary_stores:
                 sec_store.save(db_new_path)
-                face_store_name = sec_name  # last secondary is the face store name
         logger.info("Saved new DB to %s", db_new_path)
 
         meta = IndexMeta.now(
@@ -200,7 +201,7 @@ class IndexingRunner:
                         for sec_store, _ in secondary_stores:
                             try:
                                 sec_store.load_for_update(existing_db_path)
-                            except (FileNotFoundError, Exception):
+                            except FileNotFoundError:
                                 # Secondary store not present yet (e.g. first face run).
                                 sec_store.create_empty()
         else:

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from common.index import CaptionItem
+from common.index import CaptionItem, FaceItem, IndexResult, IndexStore
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -81,6 +81,23 @@ class FaceResult(BaseModel):
     score: float = 0.0
 
 
+def _filter_by_faces(
+    results: list[IndexResult[CaptionItem]],
+    face_ids_str: str,
+    face_store: IndexStore[FaceItem],
+) -> list[IndexResult[CaptionItem]]:
+    """Return *results* filtered to items whose relative_path appears in the
+    given face clusters.  Returns the unfiltered list if *face_store* is None.
+    """
+    requested_fids = {fid.strip() for fid in face_ids_str.split(",") if fid.strip()}
+    candidate_paths: set[str] = set()
+    for fid in requested_fids:
+        meta = face_store.get_metadata(fid)
+        if meta:
+            candidate_paths.update(p for p in meta.get("image_paths", "").split(",") if p)
+    return [r for r in results if r.relative_path in candidate_paths]
+
+
 def _get_ctx() -> AppState:
     """Return the AppState, raising 503 if startup did not complete."""
     ctx: AppState | None = getattr(app.state, "ctx", None)
@@ -112,13 +129,7 @@ async def search(
 
     # Optional face-cluster filter.
     if face_ids and ctx.face_store is not None:
-        requested_fids = {fid.strip() for fid in face_ids.split(",") if fid.strip()}
-        candidate_paths: set[str] = set()
-        for fid in requested_fids:
-            meta = ctx.face_store.get_metadata(fid)
-            if meta:
-                candidate_paths.update(p for p in meta.get("image_paths", "").split(",") if p)
-        results = [r for r in results if r.relative_path in candidate_paths]
+        results = _filter_by_faces(results, face_ids, ctx.face_store)
 
     return [
         SearchResult(
