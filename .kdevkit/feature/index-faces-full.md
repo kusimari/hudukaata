@@ -124,9 +124,9 @@ Search endpoint filters text results to `candidate_paths` derived from requested
 
 ## Status
 
-- [ ] Plan approved
-- [ ] Phase A complete
-- [ ] Phase B complete
-- [ ] Phase C complete
-- [ ] Phase D complete
-- [ ] Pushed
+- [x] Plan approved
+- [x] Phase A complete
+- [x] Phase B complete
+- [x] Phase C complete
+- [x] Phase D complete
+- [x] Pushed
