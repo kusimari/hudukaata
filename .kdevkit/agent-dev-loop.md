@@ -67,7 +67,8 @@ application code or tests to paper over a broken environment.
    ```bash
    git diff $(git merge-base HEAD main)...HEAD
    ```
-4. Launch a sub-agent with the diff + `.kdevkit/review.md` **§ Incremental review** as the prompt.
+4. Delegate to a review sub-agent — see **Sub-agent delegation** below.
+   Pass: diff + `§ Incremental review` from `review.md` + this package's constraints from `project.md`.
 5. Read `quality_threshold` from `project.md` (default 70).
    - Score ≥ threshold → proceed to Stage 2.
    - Score < threshold → address the highest-severity findings, re-run the sub-agent **once**.
@@ -100,8 +101,8 @@ git commit -m "dev: <what was implemented>"
 
 ## Stage 4 — PR review gate
 
-Compute the full diff and launch a sub-agent with `.kdevkit/review.md` **§ PR review**
-as the prompt:
+Delegate to a review sub-agent — see **Sub-agent delegation** below.
+Pass: full diff + `§ PR review` from `review.md` + all affected packages' constraints from `project.md`.
 
 ```bash
 git diff $(git merge-base HEAD main)...HEAD
@@ -143,7 +144,7 @@ git push -u origin <feature-branch>
 ## Stage 7 — Human review gate
 
 1. Ask the human to open a PR and paste the URL.
-2. `WebFetch` the diff URL → launch sub-agent with PR review prompt → present findings.
+2. `WebFetch` the PR diff URL → delegate to a review sub-agent (same as Stage 4) → present findings.
 3. Wait for human response:
    - **Approve** → update feature file status to `ready-for-merge`. Do NOT merge.
    - **Request changes** → fix → Stage 1 → Stage 2 → `hfix:` commit → push → repeat.
@@ -175,3 +176,43 @@ Testing:
 ```
 
 Keep it under ~40 lines. Omit empty sections.
+
+---
+
+## Sub-agent delegation
+
+Review stages delegate to an isolated sub-agent that receives only what it needs.
+This keeps the reviewer focused and prevents session history from polluting findings.
+
+**What to pass (nothing else):**
+1. The diff — output of `git diff $(git merge-base HEAD main)...HEAD`
+2. The review criteria — copy-paste the relevant section from `.kdevkit/review.md`:
+   - `§ Incremental review` for the quality gate
+   - `§ PR review` for the PR review gate
+3. Per-package constraints — copy-paste the matching row(s) from the
+   Per-Package Review Constraints table in `project.md`
+
+**Instruct the sub-agent:** "Do not read or modify any files. Return findings and
+score using the output format in the review criteria."
+
+Parse the `QUALITY SCORE: N/100` line from the response to decide pass/fail.
+
+---
+
+## Parallelization
+
+Independent packages can run their full loops simultaneously. Identify safe groups
+using the Package Dependency Map in `project.md`.
+
+**Typical safe groups:**
+- `webapp` is always independent — run its loop in parallel with any other package.
+- `indexer` and `search` are independent of each other. Run them in parallel
+  **after** `common` passes quality + test (their stubs depend on common interfaces).
+
+**How:** launch one sub-agent per package in a single message, each receiving the
+package name, its commands from `project.md`, and the diff scoped to its files.
+Wait for all sub-agents to finish before making any `dev:` commit. If any package
+fails, fix before committing any package.
+
+This is **inter-package parallelism only**. Within a single package, quality → test
+→ review remain sequential — each gate depends on the one before it.
