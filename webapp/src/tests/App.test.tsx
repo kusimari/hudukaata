@@ -40,8 +40,8 @@ describe('App', () => {
 
   it('calls search and renders result cards on submit', async () => {
     vi.mocked(api.search).mockResolvedValueOnce([
-      { id: '1', caption: 'A cat', relative_path: 'cat.jpg', extra: {} },
-      { id: '2', caption: 'A dog', relative_path: 'dog.jpg', extra: {} },
+      { id: '1', caption: 'A cat', relative_path: 'cat.jpg', face_cluster_ids: [], extra: {} },
+      { id: '2', caption: 'A dog', relative_path: 'dog.jpg', face_cluster_ids: [], extra: {} },
     ])
 
     render(<App />)
@@ -50,7 +50,7 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByText('A cat')).toBeInTheDocument())
     expect(screen.getByText('A dog')).toBeInTheDocument()
-    expect(api.search).toHaveBeenCalledWith('animals')
+    expect(api.search).toHaveBeenCalledWith('animals', undefined, [])
   })
 
   it('shows an error alert when search rejects', async () => {
@@ -103,8 +103,8 @@ describe('App', () => {
 
   it('replaces old results with new results on subsequent searches', async () => {
     vi.mocked(api.search)
-      .mockResolvedValueOnce([{ id: '1', caption: 'First result', relative_path: 'a.jpg', extra: {} }])
-      .mockResolvedValueOnce([{ id: '2', caption: 'Second result', relative_path: 'b.jpg', extra: {} }])
+      .mockResolvedValueOnce([{ id: '1', caption: 'First result', relative_path: 'a.jpg', face_cluster_ids: [], extra: {} }])
+      .mockResolvedValueOnce([{ id: '2', caption: 'Second result', relative_path: 'b.jpg', face_cluster_ids: [], extra: {} }])
 
     render(<App />)
     const input = screen.getByRole('searchbox')

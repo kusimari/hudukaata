@@ -1,12 +1,15 @@
-import { StrictMode, useState } from 'react'
+import { StrictMode, useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { getApiBase, setApiBase, search, SearchResult } from './api'
-import SearchBar from './components/SearchBar'
+import { FaceResult, SearchResult, getApiBase, getFaces, search, setApiBase } from './api'
+import FaceRibbon from './components/FaceRibbon'
 import ResultCard from './components/ResultCard'
+import SearchBar from './components/SearchBar'
 
 export default function App() {
   const [apiUrl, setApiUrl] = useState<string>(getApiBase)
   const [results, setResults] = useState<SearchResult[]>([])
+  const [faces, setFaces] = useState<FaceResult[]>([])
+  const [selectedFaceIds, setSelectedFaceIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -15,23 +18,38 @@ export default function App() {
     setApiBase(url)
   }
 
-  async function handleSearch(query: string) {
-    if (!apiUrl) {
-      setError('Please set an API server URL before searching.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await search(query)
-      setResults(data)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed')
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
+  // Load face clusters whenever the API URL is set.
+  useEffect(() => {
+    if (!apiUrl) return
+    getFaces().then(setFaces).catch(() => setFaces([]))
+  }, [apiUrl])
+
+  function handleFaceToggle(clusterId: string) {
+    setSelectedFaceIds((prev) =>
+      prev.includes(clusterId) ? prev.filter((id) => id !== clusterId) : [...prev, clusterId],
+    )
   }
+
+  const handleSearch = useCallback(
+    async (query: string) => {
+      if (!apiUrl) {
+        setError('Please set an API server URL before searching.')
+        return
+      }
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await search(query, undefined, selectedFaceIds)
+        setResults(data)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Search failed')
+        setResults([])
+      } finally {
+        setLoading(false)
+      }
+    },
+    [apiUrl, selectedFaceIds],
+  )
 
   return (
     <main>
@@ -44,6 +62,11 @@ export default function App() {
           onChange={(e) => handleApiUrlChange(e.target.value)}
         />
       </label>
+      <FaceRibbon
+        faces={faces}
+        selectedFaceIds={selectedFaceIds}
+        onToggle={handleFaceToggle}
+      />
       <SearchBar onSearch={handleSearch} disabled={loading} />
       {loading && <p>Loading…</p>}
       {error !== null && <p role="alert">{error}</p>}

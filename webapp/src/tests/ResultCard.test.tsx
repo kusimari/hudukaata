@@ -4,7 +4,7 @@ import ResultCard from '../components/ResultCard'
 import type { SearchResult } from '../api'
 
 function makeResult(relative_path: string, caption = 'A caption'): SearchResult {
-  return { id: '1', caption, relative_path, extra: {} }
+  return { id: '1', caption, relative_path, face_cluster_ids: [], extra: {} }
 }
 
 describe('ResultCard', () => {
