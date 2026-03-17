@@ -1,11 +1,12 @@
-"""Tests for the /search, /healthz, /readyz, and /media endpoints."""
+"""Tests for the /search, /faces, /healthz, /readyz, and /media endpoints."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+from common.index import FaceItem, IndexResult
 from common.media import FileMediaSource
 from fastapi.testclient import TestClient
 
@@ -14,7 +15,7 @@ from search.startup import AppState
 from tests.stubs.index_store import StubIndexStore
 
 
-def _make_state(results: list[dict[str, Any]] | None = None, top_k: int = 5) -> AppState:
+def _make_state(results: list[dict[str, str]] | None = None, top_k: int = 5) -> AppState:
     return AppState(
         index_store=StubIndexStore(results=results),
         top_k=top_k,
@@ -96,6 +97,94 @@ class TestSearchEndpoint:
     def test_whitespace_only_query_returns_422(self, client: TestClient) -> None:
         resp = client.get("/search?q=   ")
         assert resp.status_code == 422
+
+    def test_face_ids_filter_restricts_results(self) -> None:
+        """face_ids param filters search results to matching images."""
+        face_store_mock = MagicMock()
+        face_store_mock.get_metadata.return_value = {
+            "image_paths": "img1.jpg,img2.jpg",
+            "count": "2",
+            "representative_path": "img1.jpg",
+        }
+
+        results = [
+            {"id": "img1.jpg", "caption": "a person", "relative_path": "img1.jpg"},
+            {"id": "img3.jpg", "caption": "a dog", "relative_path": "img3.jpg"},
+        ]
+        state = AppState(
+            index_store=StubIndexStore(results=results),
+            face_store=face_store_mock,
+            top_k=5,
+            media_src=FileMediaSource(path="/media"),
+        )
+        app.state.ctx = state
+        c = TestClient(app, raise_server_exceptions=True)
+        resp = c.get("/search?q=person&face_ids=cluster-1")
+        assert resp.status_code == 200
+        items = resp.json()
+        # Only img1.jpg is in the face cluster's image_paths
+        assert len(items) == 1
+        assert items[0]["relative_path"] == "img1.jpg"
+
+    def test_face_ids_ignored_when_no_face_store(self) -> None:
+        """face_ids param is silently ignored when face store not loaded."""
+        results = [
+            {"id": "img1.jpg", "caption": "a person", "relative_path": "img1.jpg"},
+        ]
+        state = _make_state(results=results)
+        app.state.ctx = state
+        c = TestClient(app, raise_server_exceptions=True)
+        resp = c.get("/search?q=person&face_ids=cluster-1")
+        assert resp.status_code == 200
+        # Returns all results (filter skipped due to no face_store)
+        assert len(resp.json()) == 1
+
+
+class TestFacesEndpoint:
+    def test_returns_404_when_no_face_store(self, client: TestClient) -> None:
+        resp = client.get("/faces")
+        assert resp.status_code == 404
+
+    def test_returns_face_clusters(self) -> None:
+        face_store_mock = MagicMock()
+        face_store_mock.list_all.return_value = [
+            IndexResult(
+                id="cluster-1",
+                relative_path="img1.jpg",
+                item=FaceItem(embedding=[0.1] * 4, cluster_id="cluster-1"),
+                score=1.0,
+                extra={"count": "5", "image_paths": "img1.jpg,img2.jpg"},
+            )
+        ]
+        state = AppState(
+            index_store=StubIndexStore(),
+            face_store=face_store_mock,
+            top_k=5,
+            media_src=FileMediaSource(path="/media"),
+        )
+        app.state.ctx = state
+        c = TestClient(app, raise_server_exceptions=True)
+        resp = c.get("/faces")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["cluster_id"] == "cluster-1"
+        assert data[0]["count"] == 5
+        assert data[0]["representative_path"] == "img1.jpg"
+
+    def test_n_parameter_limits_face_results(self) -> None:
+        face_store_mock = MagicMock()
+        face_store_mock.list_all.return_value = []
+        state = AppState(
+            index_store=StubIndexStore(),
+            face_store=face_store_mock,
+            top_k=5,
+            media_src=FileMediaSource(path="/media"),
+        )
+        app.state.ctx = state
+        c = TestClient(app, raise_server_exceptions=True)
+        c.get("/faces?n=2")
+        face_store_mock.list_all.assert_called_once_with(2)
 
 
 class TestReadyz:

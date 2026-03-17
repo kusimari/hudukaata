@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
+from common.index import CaptionItem
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -66,7 +67,18 @@ class SearchResult(BaseModel):
     id: str
     caption: str = ""
     relative_path: str = ""
+    face_cluster_ids: list[str] = Field(default_factory=list)
     extra: dict[str, str] = Field(default_factory=dict)
+
+
+class FaceResult(BaseModel):
+    """A single face cluster returned by the faces endpoint."""
+
+    cluster_id: str
+    representative_path: str = ""
+    count: int = 0
+    image_paths: list[str] = Field(default_factory=list)
+    score: float = 0.0
 
 
 def _get_ctx() -> AppState:
@@ -81,18 +93,65 @@ def _get_ctx() -> AppState:
 async def search(
     q: str = Query(..., description="Search query string."),
     n: int | None = Query(default=None, description="Number of results (overrides default)."),
+    face_ids: str | None = Query(
+        default=None,
+        description="Comma-separated face cluster IDs to filter results.",
+    ),
 ) -> list[SearchResult]:
-    """Return the top semantic matches for the query string *q*."""
+    """Return the top semantic matches for the query string *q*.
+
+    Optionally filter results to only images that contain the given face
+    cluster IDs (pass *face_ids* as a comma-separated string).
+    """
     ctx = _get_ctx()
     if not q.strip():
         raise HTTPException(status_code=422, detail="Query string 'q' must not be empty.")
-    results = await asyncio.to_thread(ctx.index_store.search, q, n if n is not None else ctx.top_k)
+
+    top_k = n if n is not None else ctx.top_k
+    results = await asyncio.to_thread(ctx.index_store.search, CaptionItem(text=q), top_k)
+
+    # Optional face-cluster filter.
+    if face_ids and ctx.face_store is not None:
+        requested_fids = {fid.strip() for fid in face_ids.split(",") if fid.strip()}
+        candidate_paths: set[str] = set()
+        for fid in requested_fids:
+            meta = ctx.face_store.get_metadata(fid)
+            if meta:
+                candidate_paths.update(p for p in meta.get("image_paths", "").split(",") if p)
+        results = [r for r in results if r.relative_path in candidate_paths]
+
     return [
         SearchResult(
             id=r.id,
-            caption=r.caption,
+            caption=r.item.text,
             relative_path=r.relative_path,
-            extra=r.extra,
+            face_cluster_ids=[fid for fid in r.extra.get("face_cluster_ids", "").split(",") if fid],
+            extra={k: v for k, v in r.extra.items() if k != "face_cluster_ids"},
+        )
+        for r in results
+    ]
+
+
+@app.get("/faces", response_model=list[FaceResult])
+async def faces(
+    n: int | None = Query(default=None, description="Max number of face clusters to return."),
+) -> list[FaceResult]:
+    """Return face clusters sorted by frequency (most common faces first)."""
+    ctx = _get_ctx()
+    if ctx.face_store is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Face store not loaded. Start the server with a face-aware indexer key.",
+        )
+    top_k = n if n is not None else ctx.top_k
+    results = await asyncio.to_thread(ctx.face_store.list_all, top_k)
+    return [
+        FaceResult(
+            cluster_id=r.id,
+            representative_path=r.relative_path,
+            count=int(r.extra.get("count", "0")),
+            image_paths=[p for p in r.extra.get("image_paths", "").split(",") if p],
+            score=r.score,
         )
         for r in results
     ]

@@ -20,6 +20,14 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="SEARCH_")
 
+    indexer_key: str = "blip2-sentok-exif"
+    """Indexer variant to serve.
+
+    Determines which store(s) are loaded on startup:
+    - ``blip2-sentok-exif`` — caption store only
+    - ``blip2-sentok-exif-insightface`` — caption store + face store
+    """
+
     store: str
     """Store URI pointing to the directory that contains the ``db/`` index.
 
