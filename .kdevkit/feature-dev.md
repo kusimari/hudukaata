@@ -1,31 +1,64 @@
-# kdevkit Agent Workflow
+# Feature Development Workflow
 
-This document outlines a structured agent workflow for software development, emphasizing project context, feature planning, git discipline, and session management.
+Every feature goes through three phases. Never chain phases automatically —
+wait for explicit human input at each gate.
 
-## Core Workflow (5 Steps)
+---
 
-**Step 1** establishes project context by reading `.kdevkit/project.md`. If absent, the agent asks for a project description and creates the file.
+## Phase 1 — Requirements & Planning  (interactive)
 
-**Step 1.6** loads dev-loop instructions from `.kdevkit/agent-dev-instructions.md` if available, applying quality and test gates to implementation work.
+**Goal:** arrive at an approved plan before writing a single line of code.
 
-**Step 1.5** persists standing rules to agent-specific config files (e.g., `CLAUDE.md` for Claude Code) to survive across sessions.
+1. Read `.kdevkit/project.md` to orient on the project structure and constraints.
+2. Check `.kdevkit/feature/` for an existing file matching the feature name.
+   - If found: load it and resume from where it left off.
+   - If not found: create `.kdevkit/feature/<kebab-name>.md` with status `planning`.
+3. Conduct four interviews — present one area at a time, wait for the human's answer,
+   then move to the next:
 
-**Step 2** determines the feature being worked on, either from arguments or user input, then loads or creates `.kdevkit/feature/<name>.md` through a structured four-interview process:
-- Requirements (problem, user interaction, success criteria)
-- Design (technical approach, architecture)
-- Testing (validation strategy, test scenarios)
-- Implementation (task breakdown, risk mitigation)
+   | # | Area | Key questions |
+   |---|---|---|
+   | 1 | Requirements | What problem does this solve? Who uses it? What does success look like? |
+   | 2 | Design | What is the technical approach? What changes, what stays the same? Any architectural decisions? |
+   | 3 | Testing | How will we validate correctness? What are the key scenarios (happy path, error paths, edge cases)? |
+   | 4 | Implementation | What is the ordered task list? What are the risks or unknowns? |
 
-**Step 3** applies git conventions: branches as `<type>/<description>`, commits following Conventional Commits format, scope limited to the project, and PR discipline requiring passing builds before opening.
+4. Present a compact plan summary (≤ 20 lines). **Wait for explicit approval.**
+5. Update the feature file with the approved plan. Set status to `approved`.
 
-**Step 4** maintains session behavior: updating feature files after each unit of work, gating phases (stopping between them unless YOLO mode is active), presenting assumption plans when ambiguous, and offering to update project metadata upon completion.
+**Gate:** Do not start Phase 2 until the human says the plan is approved.
+Exception: if the human says "yolo", skip phase gates until they say "yolo off".
 
-**Step 5** confirms readiness with a compact summary before awaiting instruction.
+---
 
-## Key Principles
+## Phase 2 — Implementation  (agent-driven)
 
-- **Phase gating:** Never chain phases automatically without explicit user instruction
-- **Assumption plans:** Present brief plans for ambiguous inputs; wait for approval
-- **YOLO mode:** Keyword "yolo" drops gates and plans; "yolo off" restores normal behavior
-- **Commit discipline:** Every commit leaves the repo in a working state; no commented code or secrets
-- **Feature file updates:** Record progress continuously, not in batches
+**Goal:** implement the approved plan, pass all quality and test gates, and push.
+
+1. Follow `.kdevkit/agent-dev-loop.md` exactly.
+2. Run the full loop for every affected package (scope rule is in `project.md`).
+3. When all packages are green and changes are pushed, update the feature file
+   status to `in-review` and ask the human to open a PR.
+
+**Gate:** Do not move to Phase 3 until the push is done and the human has the PR URL.
+
+---
+
+## Phase 3 — Human Review  (human-led)
+
+**Goal:** incorporate human feedback and reach `ready-for-merge`.
+
+- **Minor fixes** (no design changes): stay in Phase 2 — fix, quality gate, test gate,
+  `hfix:` commit, push, update the feature file.
+- **Significant rework** (design or requirements change): return to Phase 1 — revise
+  the feature file and get a new approval.
+- **Approved**: set feature file status to `ready-for-merge`. Do NOT merge — leave
+  that for the human reviewer.
+
+---
+
+## Feature file discipline
+
+- Update `.kdevkit/feature/<name>.md` after each meaningful unit of work (not in batches).
+- The file is the single source of truth for what was decided, why, and what was done.
+- Use it to resume interrupted sessions without losing context.
