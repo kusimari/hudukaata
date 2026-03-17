@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from common.base import StorePointer
+from common.index import CaptionItem
 from common.media import FileMediaSource
 
 from indexer.runner import run
@@ -112,8 +113,8 @@ class TestBatchIndexing:
         idx2 = ChromaCaptionIndexStore()
         idx2.load(store2 / "db")
 
-        results1 = {r.relative_path for r in idx1.search("image", top_k=10)}
-        results2 = {r.relative_path for r in idx2.search("image", top_k=10)}
+        results1 = {r.relative_path for r in idx1.search(CaptionItem(text="image"), top_k=10)}
+        results2 = {r.relative_path for r in idx2.search(CaptionItem(text="image"), top_k=10)}
         assert results1 == results2
 
     def test_checkpoint_written_per_batch_when_interval_zero(

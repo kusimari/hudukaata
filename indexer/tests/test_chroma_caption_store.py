@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from common.index import CaptionItem
 
 from indexer.stores.chroma_caption import _META_FILE, ChromaCaptionIndexStore
 from indexer.vectorizers.base import Vectorizer
@@ -30,18 +31,18 @@ class TestCreateEmptyAndAdd:
     def test_create_empty_allows_adding(self) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store.create_empty()
-        store.add("id1", "a cat", {"caption": "a cat"})
+        store.add("id1", CaptionItem(text="a cat"), {"caption": "a cat"})
 
     def test_add_raises_if_not_initialised(self) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         with pytest.raises(RuntimeError, match="not initialised"):
-            store.add("x", "text", {})
+            store.add("x", CaptionItem(text="text"), {})
 
     def test_multiple_adds(self, tmp_path: Path) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store.create_empty()
-        store.add("doc1", "first text", {"caption": "first"})
-        store.add("doc2", "second text", {"caption": "second"})
+        store.add("doc1", CaptionItem(text="first text"), {"caption": "first"})
+        store.add("doc2", CaptionItem(text="second text"), {"caption": "second"})
         dest = tmp_path / "db"
         store.save(dest)
         assert dest.is_dir()
@@ -51,7 +52,7 @@ class TestSave:
     def test_save_creates_directory_and_metadata(self, tmp_path: Path) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store.create_empty()
-        store.add("id1", "test text", {"caption": "test"})
+        store.add("id1", CaptionItem(text="test text"), {"caption": "test"})
 
         dest = tmp_path / "db_new"
         store.save(dest)
@@ -77,14 +78,14 @@ class TestLoad:
     def test_load_opens_existing_collection(self, tmp_path: Path) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store.create_empty()
-        store.add("x", "hi there", {"caption": "hi"})
+        store.add("x", CaptionItem(text="hi there"), {"caption": "hi"})
         dest = tmp_path / "db"
         store.save(dest)
 
         store2 = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store2.load(dest)
         # Should not raise — collection exists
-        store2.add("y", "hello there", {"caption": "there"})
+        store2.add("y", CaptionItem(text="hello there"), {"caption": "there"})
 
 
 class TestCreatedAt:
@@ -125,31 +126,31 @@ class TestSearch:
     def test_search_raises_if_not_initialised(self) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         with pytest.raises(RuntimeError, match="not initialised"):
-            store.search("query", top_k=3)
+            store.search(CaptionItem(text="query"), top_k=3)
 
     def test_search_returns_index_results(self) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store.create_empty()
         store.add(
             "img_0.jpg",
-            "a dog",
+            CaptionItem(text="a dog"),
             {"caption": "a dog", "relative_path": "img_0.jpg"},
         )
         store.add(
             "img_1.jpg",
-            "a cat",
+            CaptionItem(text="a cat"),
             {"caption": "a cat", "relative_path": "img_1.jpg"},
         )
 
-        results = store.search("animal", top_k=1)
+        results = store.search(CaptionItem(text="animal"), top_k=1)
         assert len(results) == 1
         assert results[0].id in ("img_0.jpg", "img_1.jpg")
-        assert results[0].caption in ("a dog", "a cat")
+        assert results[0].item.text in ("a dog", "a cat")
 
     def test_search_empty_store_returns_empty(self) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store.create_empty()
-        results = store.search("query", top_k=5)
+        results = store.search(CaptionItem(text="query"), top_k=5)
         assert results == []
 
     def test_semantic_search_finds_relevant_results(self) -> None:
@@ -173,14 +174,14 @@ class TestSearch:
         for i, caption in enumerate(captions):
             store.add(
                 f"img_{i:03d}.jpg",
-                caption,
+                CaptionItem(text=caption),
                 {"caption": caption, "relative_path": f"img_{i:03d}.jpg"},
             )
 
-        results = store.search("dog fetching a ball outdoors", top_k=5)
+        results = store.search(CaptionItem(text="dog fetching a ball outdoors"), top_k=5)
 
         assert len(results) > 0
-        found_captions = [r.caption for r in results]
+        found_captions = [r.item.text for r in results]
         assert any("dog" in c.lower() for c in found_captions), (
             f"Expected dog-related caption in top-5 results, got: {found_captions}"
         )
@@ -190,7 +191,7 @@ class TestGetMetadata:
     def test_get_metadata_returns_dict(self) -> None:
         store = ChromaCaptionIndexStore(vectorizer=_FixedVectorizer())
         store.create_empty()
-        store.add("x", "hello", {"caption": "hello", "relative_path": "x.jpg"})
+        store.add("x", CaptionItem(text="hello"), {"caption": "hello", "relative_path": "x.jpg"})
         meta = store.get_metadata("x")
         assert meta is not None
         assert meta["caption"] == "hello"
@@ -207,13 +208,13 @@ class TestStubIndexStore:
     def test_upsert_and_get_metadata(self) -> None:
         stub = StubIndexStore()
         stub.create_empty()
-        stub.upsert("a", "text", {"k": "v"})
+        stub.upsert("a", CaptionItem(text="text"), {"k": "v"})
         assert stub.get_metadata("a") == {"k": "v"}
 
     def test_search_returns_results(self) -> None:
         stub = StubIndexStore()
         stub.create_empty()
-        stub.upsert("a", "text", {"caption": "hello", "relative_path": "a.jpg"})
-        results = stub.search("anything", top_k=5)
+        stub.upsert("a", CaptionItem(text="text"), {"caption": "hello", "relative_path": "a.jpg"})
+        results = stub.search(CaptionItem(text="anything"), top_k=5)
         assert len(results) == 1
         assert results[0].id == "a"

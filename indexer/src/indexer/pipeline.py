@@ -68,6 +68,7 @@ class BatchItem:
     exif: dict[str, str] = field(default_factory=dict)
     text: str = ""
     face_vectors: list[list[float]] = field(default_factory=list)
+    face_cluster_ids: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
