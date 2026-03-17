@@ -8,11 +8,23 @@ and package dependencies live in `.kdevkit/project.md` — read it first.
 ## The loop
 
 ```
-setup → code → quality → code → test → code → auto-review → code → push → human-ready
+setup
+ → code
+ → quality gate  ◄──────────────────────────────────────────────┐
+    fail: fix → re-run quality (max 1 retry, then proceed+note)  │
+ → test gate                                                      │
+    fail: fix → [non-trivial change? → re-run quality ───────────┘] → re-run test
+ → auto-review
+    findings: fix → quality → test → re-run auto-review
+ → dev: commit
+ → PR review
+    findings: fix → quality → test → fixes: commit
+ → push → human-ready
 ```
 
-Any stage can loop back to any prior stage. The loop runs once per affected package
-(see scope rule in `project.md`).
+Any stage can loop back to any prior stage. Quality is re-entered any time
+non-trivial code is written — including after test fixes and review fixes.
+The loop runs once per affected package (see scope rule in `project.md`).
 
 ---
 
@@ -144,25 +156,22 @@ When the human asks for a squash merge summary, read the structured commit log �
 do not re-read the diff:
 
 ```bash
-git log --format="%h %s" $(git merge-base HEAD main)..HEAD
+git log --format="%h %s%n%b" $(git merge-base HEAD main)..HEAD
 ```
 
 Build the summary from commit prefixes:
 
 ```
-<feature title from plan: subject>
+<one-line summary from plan: subject>
 
-## What changed
-<2–4 bullets from dev: body>
+<Feature summary: what problem this solves and why — from plan: body>
 
-## Why
-<goal paragraph from plan: body>
+Changes:
+- <one bullet per important file or design decision — from dev: body>
 
-## Review findings resolved
-<finding resolutions from fixes: body; note any deferred items>
-
-## Quality gate
-<score line from review: subject>
+Testing:
+- <test strategy and what was validated — from test gate and dev: body>
+- Quality score: <N>/100 PASS  (or note score + reason if below threshold)
 ```
 
 Keep it under ~40 lines. Omit empty sections.
