@@ -44,17 +44,49 @@ and push.
 
 1. Spawn a sub-agent with:
    - The feature file path and the approved plan.
-   - The instruction: "Follow `.kdevkit/agent-dev-loop.md` exactly."
+   - The instruction: "Follow `.kdevkit/innerspace-loop.md` exactly."
 2. The sub-agent creates a work branch, implements, passes all gates, and merges back
-   to the feature branch (details in `agent-dev-loop.md`). It does **not** push.
+   to the feature branch (details in `innerspace-loop.md`). It does **not** push.
 3. After the sub-agent returns: run all in-scope package tests on the feature branch.
    - If any test fails: re-spawn the sub-agent with the original ask + failure output.
    - Retry until tests pass (respecting `max_test_fix_attempts` from `project.md`).
 4. When all packages are green: push the feature branch with a squash-merge summary
-   commit (format from `agent-dev-loop.md § Squash merge summary`).
+   commit (format from `innerspace-loop.md § Squash merge summary`).
 5. Update the feature file status to `in-review`.
 
 **Gate:** Do not move to Phase 3 until the push is done.
+
+---
+
+## Phase 2.5 — Summary Playback  (automatic)
+
+**Goal:** give the human reviewer full context before they start reviewing.
+
+After the Phase 2 push completes, present a structured summary to the human:
+
+1. **Plan recap** — restate the approved plan from Phase 1 (what problem, what approach,
+   key decisions). Keep it to ≤ 10 lines.
+2. **Implementation summary** — extract from the sub-agent's merge commit message:
+   - What was changed (the `Changes:` section)
+   - What was tested (the `Testing:` section)
+   - Quality score and verdict
+3. **Diff stats** — run `git diff --stat <base>..HEAD` and include the output.
+
+Format:
+
+```
+### Plan recap
+<plan summary from the feature file>
+
+### What was done
+<changes and testing from the merge commit>
+
+### Diff stats
+<git diff --stat output>
+```
+
+This summary is informational — it does not block Phase 3. Proceed directly to
+waiting for human review feedback.
 
 ---
 

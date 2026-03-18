@@ -70,8 +70,10 @@ disallow_untyped_decorators = false
 # These packages ship no type stubs and have no third-party stub packages.
 module = [
     "chromadb.*",
+    "cv2.*",
     "cytoolz.*",
     "exifread.*",
+    "insightface.*",
     "whisper.*",
     "sentence_transformers.*",
     "google.colab.*",
