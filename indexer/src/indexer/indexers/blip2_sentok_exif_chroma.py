@@ -2,7 +2,7 @@
 
 This indexer assembles a :class:`~indexer.pipeline.Pipeline` whose stages are:
 
-  open → caption (batched) → exif → format_text → upsert (batched) → close
+  open → caption (batched) → exif → format_text → upsert_captions (batched) → close
 
 Caption batching is handled by the pipeline runner; vectorisation is internal
 to the :class:`~common.index.IndexStore` implementation (ChromaDB +
@@ -23,7 +23,7 @@ from indexer.stages import (
     exif_stage,
     format_text_stage,
     open_stage,
-    upsert_stage,
+    upsert_captions_stage,
 )
 
 
@@ -51,7 +51,7 @@ class Blip2SentTokExifChromaIndexer:
                     caption_stage(self._model),
                     exif_stage(),
                     format_text_stage(),
-                    upsert_stage(self._store),
+                    upsert_captions_stage(self._store),
                     close_stage(),
                 ]
             )

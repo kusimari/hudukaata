@@ -14,7 +14,7 @@ from indexer.stages import (
     exif_stage,
     format_text_stage,
     open_stage,
-    upsert_stage,
+    upsert_captions_stage,
 )
 from tests.stubs.caption_model import StubCaptionModel
 from tests.stubs.index_store import StubIndexStore
@@ -199,7 +199,7 @@ class TestUpsertStage:
         item.text = "a cat"
         item.exif = {}
 
-        result = upsert_stage(store)[0].fn([item])
+        result = upsert_captions_stage(store)[0].fn([item])
 
         assert result == [item]
         assert store.get_metadata("a.jpg") is not None
@@ -207,7 +207,7 @@ class TestUpsertStage:
     def test_empty_input(self) -> None:
         store = StubIndexStore()
         store.create_empty()
-        assert upsert_stage(store)[0].fn([]) == []
+        assert upsert_captions_stage(store)[0].fn([]) == []
 
 
 # ---------------------------------------------------------------------------

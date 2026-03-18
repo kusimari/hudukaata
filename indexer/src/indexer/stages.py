@@ -14,9 +14,7 @@ that need them.
 from __future__ import annotations
 
 import logging
-from typing import cast
 
-import cytoolz as tz
 from common.index import CaptionItem, IndexStore
 
 from indexer.exif import extract_exif
@@ -49,10 +47,7 @@ def open_stage() -> list[Stage]:
             return None
 
     def fn(items: list[BatchItem]) -> list[BatchItem]:
-        return cast(
-            list[BatchItem],
-            tz.pipe(items, lambda xs: map(_try_open, xs), lambda xs: filter(None, xs), list),
-        )
+        return [item for item in map(_try_open, items) if item is not None]
 
     return [Stage(fn, batched=False)]
 
@@ -88,7 +83,10 @@ def exif_stage() -> list[Stage]:
             logger.warning("EXIF extraction failed for %s: %s", item.media_file.relative_path, exc)
         return item
 
-    return [Stage(lambda items: list(map(_apply, items)), batched=False)]
+    def fn(items: list[BatchItem]) -> list[BatchItem]:
+        return list(map(_apply, items))
+
+    return [Stage(fn, batched=False)]
 
 
 def format_text_stage() -> list[Stage]:
@@ -98,7 +96,10 @@ def format_text_stage() -> list[Stage]:
         item.text = format_text(item.caption, item.exif)
         return item
 
-    return [Stage(lambda items: list(map(_apply, items)), batched=False)]
+    def fn(items: list[BatchItem]) -> list[BatchItem]:
+        return list(map(_apply, items))
+
+    return [Stage(fn, batched=False)]
 
 
 def close_stage() -> list[Stage]:
@@ -108,35 +109,10 @@ def close_stage() -> list[Stage]:
         item._stack.close()
         return item
 
-    return [Stage(lambda items: list(map(_apply, items)), batched=False)]
-
-
-# ---------------------------------------------------------------------------
-# Caption-only stage
-# ---------------------------------------------------------------------------
-
-
-def upsert_stage(store: IndexStore[CaptionItem]) -> list[Stage]:
-    """Write all items to the caption index store in one batch call."""
-
     def fn(items: list[BatchItem]) -> list[BatchItem]:
-        if not items:
-            return items
-        ids = [item.media_file.relative_path for item in items]
-        caption_items = [CaptionItem(text=item.text) for item in items]
-        metadatas: list[dict[str, str]] = [
-            {
-                "caption": item.caption,
-                "relative_path": item.media_file.relative_path,
-                "file_mtime": item.file_mtime,
-                **item.exif,
-            }
-            for item in items
-        ]
-        store.upsert_batch(ids, caption_items, metadatas)
-        return items
+        return list(map(_apply, items))
 
-    return [Stage(fn, batched=True)]
+    return [Stage(fn, batched=False)]
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +157,10 @@ def assign_clusters_stage(clusterer: FaceClusterer) -> list[Stage]:
         item.face_cluster_ids = cluster_ids
         return item
 
-    return [Stage(lambda items: list(map(_apply, items)), batched=False)]
+    def fn(items: list[BatchItem]) -> list[BatchItem]:
+        return list(map(_apply, items))
+
+    return [Stage(fn, batched=False)]
 
 
 def upsert_captions_stage(store: IndexStore[CaptionItem]) -> list[Stage]:
