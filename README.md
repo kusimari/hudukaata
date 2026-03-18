@@ -121,7 +121,7 @@ The first run downloads the BLIP-2 model (~4 GB). Subsequent runs reuse the nix 
 
 ## Development
 
-See [.kdevkit/agent-dev-instructions.md](.kdevkit/agent-dev-instructions.md) for the per-package dev loop (setup → quality → test → push).
+See [.kdevkit/innerspace-loop.md](.kdevkit/innerspace-loop.md) for the per-package dev loop (setup → quality → test → review → merge).
 
 ---
 
