@@ -130,3 +130,4 @@ Search endpoint filters text results to `candidate_paths` derived from requested
 - [x] Phase C complete
 - [x] Phase D complete
 - [x] Pushed
+- [ ] Human review fix (hfix): update `type: ignore` error codes in `insightface.py` from `import-untyped` → `import-not-found` for `insightface` and `cv2` imports (mypy `[unused-ignore]` failure)

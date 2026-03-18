@@ -61,7 +61,7 @@ class InsightFaceModel:
     def _load_app(self) -> None:
         if self._app is not None:
             return
-        import insightface  # type: ignore[import-untyped]
+        import insightface  # type: ignore[import-not-found]
 
         app = insightface.app.FaceAnalysis(
             allowed_modules=["detection", "recognition"],
@@ -71,7 +71,7 @@ class InsightFaceModel:
         self._app = app
 
     def _detect_one(self, path: Path) -> list[list[float]]:
-        import cv2  # type: ignore[import-untyped]
+        import cv2  # type: ignore[import-not-found]
 
         self._load_app()
         img = cv2.imread(str(path))
