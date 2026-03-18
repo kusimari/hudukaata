@@ -238,32 +238,32 @@ class TestCaption:
 
         assert result == "some speech"
 
-    def test_video_combines_frame_captions(self, sample_video_path: Path):
+    def test_video_combines_frame_captions(self, tmp_path: Path):
         model = Blip2CaptionModel()
-        fake_frame = sample_video_path.parent / "fake_frame.jpg"
+        fake_frame = tmp_path / "fake_frame.jpg"
         fake_frame.write_bytes(b"fake")
         model._extract_frames = MagicMock(return_value=[fake_frame])  # type: ignore[method-assign]
         model._caption_image = MagicMock(return_value="a blue square")  # type: ignore[method-assign]
 
-        mf = _mf(sample_video_path, "video")
+        mf = _mf(tmp_path / "video.mp4", "video")
         with mf:
             result = model.caption(mf)
 
         assert result == "a blue square"
         fake_frame.unlink(missing_ok=True)
 
-    def test_video_skips_empty_captions(self, sample_video_path: Path):
+    def test_video_skips_empty_captions(self, tmp_path: Path):
         model = Blip2CaptionModel()
         fake_frames = []
         for i in range(2):
-            f = sample_video_path.parent / f"f{i}.jpg"
+            f = tmp_path / f"f{i}.jpg"
             f.write_bytes(b"x")
             fake_frames.append(f)
 
         model._extract_frames = MagicMock(return_value=fake_frames)  # type: ignore[method-assign]
         model._caption_image = MagicMock(side_effect=["caption one", ""])  # type: ignore[method-assign]
 
-        mf = _mf(sample_video_path, "video")
+        mf = _mf(tmp_path / "video.mp4", "video")
         with mf:
             result = model.caption(mf)
 

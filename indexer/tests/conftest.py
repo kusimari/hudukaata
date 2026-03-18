@@ -57,5 +57,5 @@ def sample_video_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
             check=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
-        pytest.fail(f"ffmpeg not available or failed: {exc}\nFix: run `nix develop .#indexer`")
+        pytest.skip(f"ffmpeg not available or failed: {exc}\nFix: run `nix develop .#indexer`")
     return path
