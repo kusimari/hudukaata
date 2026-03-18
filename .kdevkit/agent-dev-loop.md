@@ -8,23 +8,24 @@ and package dependencies live in `.kdevkit/project.md` — read it first.
 ## The loop
 
 ```
-setup
+setup (create work branch)
  → code
  → quality gate  ◄──────────────────────────────────────────────┐
     fail: fix → re-run quality (max 1 retry, then proceed+note)  │
  → test gate                                                      │
     fail: fix → [non-trivial change? → re-run quality ───────────┘] → re-run test
- → auto-review
-    findings: fix → quality → test → re-run auto-review
  → dev: commit
- → PR review
+ → PR review gate
     findings: fix → quality → test → fixes: commit
- → push → human-ready
+ → merge work branch → return to caller
 ```
 
 Any stage can loop back to any prior stage. Quality is re-entered any time
 non-trivial code is written — including after test fixes and review fixes.
 The loop runs once per affected package (see scope rule in `project.md`).
+
+The sub-agent does **not** push and does **not** interact with the human.
+Pushing and summary commits are handled by the orchestrator (see `feature-dev.md`).
 
 ---
 
@@ -52,6 +53,15 @@ Rules:
 
 Run once per affected package at the start of every session (or after any environment
 file change). Use the setup command from `project.md`.
+
+**Create a work branch** off the current feature branch before writing any code:
+
+```bash
+git checkout -b work/<short-slug>-<timestamp>
+```
+
+All commits during the loop go to this branch. The work branch is merged back to
+the feature branch at the end (Stage 5).
 
 If a tool is missing or a dependency fails: fix the environment config file
 (`flake.nix`, `pyproject.toml`, `package.json`) — never add runtime guards in
@@ -82,8 +92,8 @@ application code or tests to paper over a broken environment.
 2. Zero failures required.
 3. For each failure: fix and re-run. Count each fix-and-rerun against `max_test_fix_attempts`
    from `project.md` (default 2).
-4. If still failing after the limit: **stop**. Do not push. Report the remaining failures
-   so the human can decide.
+4. If still failing after the limit: **stop**. Do not merge. Report the remaining failures
+   so the caller can decide.
 5. If the fix required non-trivial code changes, re-run Stage 1 once before continuing.
 
 ---
@@ -131,23 +141,18 @@ Address each finding from the PR review:
 
 ---
 
-## Stage 6 — Push
+## Stage 6 — Merge work branch and return
 
-Only after all affected packages pass all gates and fixes are committed:
+After all fixes are committed on the work branch:
 
 ```bash
-git push -u origin <feature-branch>
+git checkout <feature-branch>
+git merge --no-ff work/<slug> -m "merge: <one-line summary of what was done>"
+git branch -d work/<slug>
 ```
 
----
-
-## Stage 7 — Human review gate
-
-1. Ask the human to open a PR and paste the URL.
-2. `WebFetch` the PR diff URL → delegate to a review sub-agent (same as Stage 4) → present findings.
-3. Wait for human response:
-   - **Approve** → update feature file status to `ready-for-merge`. Do NOT merge.
-   - **Request changes** → fix → Stage 1 → Stage 2 → `hfix:` commit → push → repeat.
+Then **return control to the caller** (feature-dev.md orchestrator). Do not push.
+Do not interact with the human.
 
 ---
 

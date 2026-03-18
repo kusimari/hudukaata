@@ -1,7 +1,7 @@
 # Feature Development Workflow
 
-Every feature goes through three phases. Never chain phases automatically —
-wait for explicit human input at each gate.
+Every change (feature, fix, or user-asked change) goes through three phases.
+Never chain phases automatically — wait for explicit human input at each gate.
 
 ---
 
@@ -10,7 +10,7 @@ wait for explicit human input at each gate.
 **Goal:** arrive at an approved plan before writing a single line of code.
 
 1. Read `.kdevkit/project.md` to orient on the project structure and constraints.
-2. Check `.kdevkit/feature/` for an existing file matching the feature name.
+2. Check `.kdevkit/feature/` for an existing file matching the feature/change name.
    - If found: load it and resume from where it left off.
    - If not found: create `.kdevkit/feature/<kebab-name>.md` with status `planning`.
 3. Conduct four interviews — present one area at a time, wait for the human's answer,
@@ -29,18 +29,32 @@ wait for explicit human input at each gate.
 **Gate:** Do not start Phase 2 until the human says the plan is approved.
 Exception: if the human says "yolo", skip phase gates until they say "yolo off".
 
+**Follow-up requests (post-planning):** Any subsequent request in the same session
+(e.g. "also fix X", "change Y", or inline corrections like the current conversation)
+must go through the same four planning stages, but in **yolo mode** — each stage
+executes without waiting for human approval between them. Update the feature file
+and set status to `approved` before proceeding to Phase 2.
+
 ---
 
 ## Phase 2 — Implementation  (agent-driven)
 
-**Goal:** implement the approved plan, pass all quality and test gates, and push.
+**Goal:** implement the approved plan via a sub-agent, pass all quality and test gates,
+and push.
 
-1. Follow `.kdevkit/agent-dev-loop.md` exactly.
-2. Run the full loop for every affected package (scope rule is in `project.md`).
-3. When all packages are green and changes are pushed, update the feature file
-   status to `in-review` and ask the human to open a PR.
+1. Spawn a sub-agent with:
+   - The feature file path and the approved plan.
+   - The instruction: "Follow `.kdevkit/agent-dev-loop.md` exactly."
+2. The sub-agent creates a work branch, implements, passes all gates, and merges back
+   to the feature branch (details in `agent-dev-loop.md`). It does **not** push.
+3. After the sub-agent returns: run all in-scope package tests on the feature branch.
+   - If any test fails: re-spawn the sub-agent with the original ask + failure output.
+   - Retry until tests pass (respecting `max_test_fix_attempts` from `project.md`).
+4. When all packages are green: push the feature branch with a squash-merge summary
+   commit (format from `agent-dev-loop.md § Squash merge summary`).
+5. Update the feature file status to `in-review`.
 
-**Gate:** Do not move to Phase 3 until the push is done and the human has the PR URL.
+**Gate:** Do not move to Phase 3 until the push is done.
 
 ---
 
@@ -48,8 +62,8 @@ Exception: if the human says "yolo", skip phase gates until they say "yolo off".
 
 **Goal:** incorporate human feedback and reach `ready-for-merge`.
 
-- **Minor fixes** (no design changes): stay in Phase 2 — fix, quality gate, test gate,
-  `hfix:` commit, push, update the feature file.
+- **Minor fixes** (no design changes): treat as a follow-up request — plan in yolo mode,
+  then re-run Phase 2 (sub-agent → test on feature branch → push with `hfix:` summary).
 - **Significant rework** (design or requirements change): return to Phase 1 — revise
   the feature file and get a new approval.
 - **Approved**: set feature file status to `ready-for-merge`. Do NOT merge — leave
