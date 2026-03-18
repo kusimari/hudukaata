@@ -27,6 +27,11 @@ dependencies = [
     "psutil>=5.9",
     # fast functional utilities (Cython implementation of toolz)
     "cytoolz>=0.12",
+    # face detection + recognition (InsightFace / ArcFace)
+    "insightface>=0.7",
+    "opencv-python-headless>=4.8",
+    # ONNX runtime for InsightFace CPU inference
+    "onnxruntime>=1.16",
 ]
 
 [project.optional-dependencies]

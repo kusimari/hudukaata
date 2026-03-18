@@ -45,9 +45,10 @@
               pkgs.python311
               pkgs.uv
               pkgs.stdenv.cc.cc.lib  # libstdc++.so.6 for pip-installed native extensions (numpy, etc.)
+              pkgs.glib              # libgthread-2.0.so.0 required by opencv-python-headless
             ];
             shellHook = ''
-              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.glib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
               FLAKE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
               VENV="$FLAKE_ROOT/indexer/.venv"
               if [ ! -d "$VENV" ]; then
@@ -67,6 +68,8 @@
               # or tests so models are only downloaded once per machine/runner.
               export HF_HOME="''${HF_HOME:-$HOME/.cache/huggingface}"
               export WHISPER_MODEL_DIR="''${WHISPER_MODEL_DIR:-$HOME/.cache/whisper}"
+              # InsightFace downloads ArcFace/RetinaFace models here on first use (~100 MB).
+              export INSIGHTFACE_HOME="''${INSIGHTFACE_HOME:-$HOME/.cache/insightface}"
               echo "indexer env ready (ffmpeg, rclone, python 3.11)"
             '';
           };
