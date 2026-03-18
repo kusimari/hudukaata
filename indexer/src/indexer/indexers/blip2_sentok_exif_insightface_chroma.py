@@ -16,8 +16,8 @@ clustering so that subsequent runs pick up existing clusters.
 from __future__ import annotations
 
 import cytoolz as tz
-
 from common.index import CaptionItem, IndexStore
+
 from indexer.batch import AdaptiveBatchController
 from indexer.face_cluster import FaceClusterer
 from indexer.models.base import CaptionModel

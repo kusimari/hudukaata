@@ -14,10 +14,11 @@ that need them.
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 import cytoolz as tz
-
 from common.index import CaptionItem, IndexStore
+
 from indexer.exif import extract_exif
 from indexer.face_cluster import FaceClusterer
 from indexer.models.base import CaptionModel
@@ -48,7 +49,10 @@ def open_stage() -> list[Stage]:
             return None
 
     def fn(items: list[BatchItem]) -> list[BatchItem]:
-        return tz.pipe(items, lambda xs: map(_try_open, xs), lambda xs: filter(None, xs), list)
+        return cast(
+            list[BatchItem],
+            tz.pipe(items, lambda xs: map(_try_open, xs), lambda xs: filter(None, xs), list),
+        )
 
     return [Stage(fn, batched=False)]
 
@@ -62,13 +66,13 @@ def caption_stage(model: CaptionModel) -> list[Stage]:
         mfs = [item.media_file for item in items]
         try:
             captions = model.caption_batch(mfs)
+            for item, caption in zip(items, captions, strict=True):
+                item.caption = caption
         except Exception as exc:
             logger.warning("caption_batch failed for batch of %d: %s", len(items), exc)
             for item in items:
                 item._stack.close()
             return []
-        for item, caption in zip(items, captions, strict=True):
-            item.caption = caption
         return items
 
     return [Stage(fn, batched=True)]
@@ -81,9 +85,7 @@ def exif_stage() -> list[Stage]:
         try:
             item.exif = extract_exif(item.media_file)
         except Exception as exc:
-            logger.warning(
-                "EXIF extraction failed for %s: %s", item.media_file.relative_path, exc
-            )
+            logger.warning("EXIF extraction failed for %s: %s", item.media_file.relative_path, exc)
         return item
 
     return [Stage(lambda items: list(map(_apply, items)), batched=False)]
