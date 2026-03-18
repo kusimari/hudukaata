@@ -1,6 +1,6 @@
 # Agent Dev Loop
 
-The implementation loop for Phase 2. All project-specific commands, thresholds,
+The implementation loop for code changes. All project-specific commands, thresholds,
 and package dependencies live in `.kdevkit/project.md` — read it first.
 
 ---
@@ -24,9 +24,6 @@ Any stage can loop back to any prior stage. Quality is re-entered any time
 non-trivial code is written — including after test fixes and review fixes.
 The loop runs once per affected package (see scope rule in `project.md`).
 
-The sub-agent does **not** push and does **not** interact with the human.
-Pushing and summary commits are handled by the orchestrator (see `feature-dev.md`).
-
 ---
 
 ## Git commit prefixes
@@ -40,7 +37,6 @@ of the feature from plan through human review:
 | `dev:` | After quality + test gates pass | What was implemented |
 | `review:` | After auto PR review (empty commit) | Review findings verbatim |
 | `fixes:` | After fix loop | How each finding was resolved |
-| `hfix:` | After human review changes | What the human asked for |
 
 Rules:
 - `plan:` and `review:` are **empty commits** (`--allow-empty`) — they anchor history, not code.
@@ -61,7 +57,7 @@ git checkout -b work/<short-slug>-<timestamp>
 ```
 
 All commits during the loop go to this branch. The work branch is merged back to
-the feature branch at the end (Stage 5).
+the feature branch at the end (Stage 6).
 
 If a tool is missing or a dependency fails: fix the environment config file
 (`flake.nix`, `pyproject.toml`, `package.json`) — never add runtime guards in
@@ -143,29 +139,35 @@ Address each finding from the PR review:
 
 ## Stage 6 — Merge work branch and return
 
-After all fixes are committed on the work branch:
+After all fixes are committed on the work branch, build the squash merge summary
+(see **Squash merge summary** below) from the work branch commit log:
+
+```bash
+git log --format="%h %s%n%b" $(git merge-base HEAD <feature-branch>)..HEAD
+```
+
+Then merge using that summary as the commit message:
 
 ```bash
 git checkout <feature-branch>
-git merge --no-ff work/<slug> -m "merge: <one-line summary of what was done>"
+git merge --no-ff work/<slug> -m "<squash-merge-summary>"
 git branch -d work/<slug>
 ```
 
-Then **return control to the caller** (feature-dev.md orchestrator). Do not push.
-Do not interact with the human.
+Return control to the caller. Do not push. Do not interact with the human.
 
 ---
 
 ## Squash merge summary
 
-When the human asks for a squash merge summary, read the structured commit log —
-do not re-read the diff:
+Build the summary from the work branch commit log — do not re-read the diff.
+Read prefixed commits only:
 
 ```bash
-git log --format="%h %s%n%b" $(git merge-base HEAD main)..HEAD
+git log --format="%h %s%n%b" $(git merge-base HEAD <feature-branch>)..HEAD
 ```
 
-Build the summary from commit prefixes:
+Format:
 
 ```
 <one-line summary from plan: subject>
