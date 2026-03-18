@@ -15,28 +15,32 @@ clustering so that subsequent runs pick up existing clusters.
 
 from __future__ import annotations
 
-import logging
+import cytoolz as tz
 
 from common.index import CaptionItem, IndexStore
-from common.media import MediaFile
-
 from indexer.batch import AdaptiveBatchController
-from indexer.exif import extract_exif
 from indexer.face_cluster import FaceClusterer
 from indexer.models.base import CaptionModel
 from indexer.models.insightface import InsightFaceModel
-from indexer.pipeline import BatchItem, Pipeline, Stage
+from indexer.pipeline import Pipeline
+from indexer.stages import (
+    assign_clusters_stage,
+    caption_stage,
+    close_stage,
+    exif_stage,
+    faces_stage,
+    format_text_stage,
+    open_stage,
+    upsert_captions_stage,
+)
 from indexer.stores.chroma_face import ChromaFaceIndexStore
-from indexer.text import format_text
-
-logger = logging.getLogger(__name__)
 
 
 class Blip2SentTokExifInsightfaceChromaIndexer:
     """Builds the face-aware indexing pipeline.
 
-    Stage methods are bound at construction time and wired together by
-    :meth:`pipeline`.
+    Stage functions are imported from :mod:`indexer.stages` and wired together
+    by :meth:`pipeline` using ``tz.concat``.
 
     Args:
         caption_model: Model used to caption images/video/audio.
@@ -60,133 +64,22 @@ class Blip2SentTokExifInsightfaceChromaIndexer:
         self._face_store = face_store
         self._clusterer = FaceClusterer(face_store, threshold=cluster_threshold)
 
-    # ------------------------------------------------------------------
-    # Stage methods — all: list[BatchItem] → list[BatchItem]
-    # ------------------------------------------------------------------
-
-    def _open(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Enter each item's file context; drop items that cannot be opened."""
-        result: list[BatchItem] = []
-        for item in items:
-            try:
-                item._stack.enter_context(item.media_file)
-                item.file_mtime = (
-                    str(item.media_file.mtime) if item.media_file.mtime is not None else ""
-                )
-                result.append(item)
-            except Exception as exc:
-                logger.warning("Could not open %s: %s", item.media_file.relative_path, exc)
-        return result
-
-    def _caption(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Caption all items in one model forward pass; drop all on failure."""
-        if not items:
-            return items
-        open_mfs: list[MediaFile] = [item.media_file for item in items]
-        try:
-            captions = self._caption_model.caption_batch(open_mfs)
-        except Exception as exc:
-            logger.warning("caption_batch failed for batch of %d: %s", len(items), exc)
-            for item in items:
-                item._stack.close()
-            return []
-        for item, caption in zip(items, captions, strict=True):
-            item.caption = caption
-        return items
-
-    def _faces(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Detect faces in one model forward pass; populates face_vectors."""
-        if not items:
-            return items
-        open_mfs: list[MediaFile] = [item.media_file for item in items]
-        try:
-            all_face_vectors = self._face_model.detect_batch(open_mfs)
-        except Exception as exc:
-            logger.warning("detect_batch failed for batch of %d: %s", len(items), exc)
-            return items  # continue without face data
-        for item, face_vectors in zip(items, all_face_vectors, strict=True):
-            item.face_vectors = face_vectors
-        return items
-
-    def _exif(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Extract EXIF / media metadata per item."""
-        for item in items:
-            try:
-                item.exif = extract_exif(item.media_file)
-            except Exception as exc:
-                logger.warning(
-                    "EXIF extraction failed for %s: %s", item.media_file.relative_path, exc
-                )
-        return items
-
-    def _assign_clusters(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Assign each detected face vector to a cluster.
-
-        Populates ``item.face_cluster_ids`` and updates the face store as a
-        side effect (via :class:`~indexer.face_cluster.FaceClusterer`).
-        """
-        for item in items:
-            cluster_ids: list[str] = []
-            for vec in item.face_vectors:
-                try:
-                    cid = self._clusterer.assign(vec, item.media_file.relative_path)
-                    cluster_ids.append(cid)
-                except Exception as exc:
-                    logger.warning(
-                        "Cluster assignment failed for face in %s: %s",
-                        item.media_file.relative_path,
-                        exc,
-                    )
-            item.face_cluster_ids = cluster_ids
-        return items
-
-    def _format_text(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Build the text string that will be vectorised and stored."""
-        for item in items:
-            item.text = format_text(item.caption, item.exif)
-        return items
-
-    def _upsert_captions(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Write all items to the caption store in one batch call."""
-        if not items:
-            return items
-        ids = [item.media_file.relative_path for item in items]
-        caption_items = [CaptionItem(text=item.text) for item in items]
-        metadatas: list[dict[str, str]] = [
-            {
-                "caption": item.caption,
-                "relative_path": item.media_file.relative_path,
-                "file_mtime": item.file_mtime,
-                "face_cluster_ids": ",".join(item.face_cluster_ids),
-                **item.exif,
-            }
-            for item in items
-        ]
-        self._caption_store.upsert_batch(ids, caption_items, metadatas)
-        return items
-
-    def _close(self, items: list[BatchItem]) -> list[BatchItem]:
-        """Close each item's ExitStack, releasing its file handle."""
-        for item in items:
-            item._stack.close()
-        return items
-
-    # ------------------------------------------------------------------
-    # Pipeline and controller factories
-    # ------------------------------------------------------------------
-
     def pipeline(self) -> Pipeline:
         """Return the ordered list of :class:`~indexer.pipeline.Stage` objects."""
-        return [
-            Stage(self._open, batched=False),
-            Stage(self._caption, batched=True),
-            Stage(self._faces, batched=True),
-            Stage(self._exif, batched=False),
-            Stage(self._assign_clusters, batched=False),
-            Stage(self._format_text, batched=False),
-            Stage(self._upsert_captions, batched=True),
-            Stage(self._close, batched=False),
-        ]
+        return list(
+            tz.concat(
+                [
+                    open_stage(),
+                    caption_stage(self._caption_model),
+                    faces_stage(self._face_model),
+                    exif_stage(),
+                    assign_clusters_stage(self._clusterer),
+                    format_text_stage(),
+                    upsert_captions_stage(self._caption_store),
+                    close_stage(),
+                ]
+            )
+        )
 
     def controller(
         self,

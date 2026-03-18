@@ -10,6 +10,7 @@ from indexer.indexers.blip2_sentok_exif_insightface_chroma import (
     Blip2SentTokExifInsightfaceChromaIndexer,
 )
 from indexer.pipeline import BatchItem
+from indexer.stages import assign_clusters_stage, faces_stage, upsert_captions_stage
 from indexer.stores.chroma_face import ChromaFaceIndexStore
 from tests.stubs.caption_model import StubCaptionModel
 from tests.stubs.index_store import StubIndexStore
@@ -54,7 +55,7 @@ def _indexer(
 
 
 # ---------------------------------------------------------------------------
-# _faces stage
+# faces_stage
 # ---------------------------------------------------------------------------
 
 
@@ -65,8 +66,8 @@ class TestFacesStage:
         item.media_file.__exit__ = lambda s, *a: None
         item._stack.enter_context(item.media_file)
 
-        idx = _indexer(faces_per_image=2)
-        result = idx._faces([item])
+        fn = faces_stage(StubInsightFaceModel(faces_per_image=2))[0].fn
+        result = fn([item])
 
         assert len(result) == 1
         assert len(result[0].face_vectors) == 2
@@ -79,42 +80,49 @@ class TestFacesStage:
         item.media_file.__exit__ = lambda s, *a: None
         item._stack.enter_context(item.media_file)
 
-        idx = _indexer(faces_per_image=2)
-        result = idx._faces([item])
+        fn = faces_stage(StubInsightFaceModel(faces_per_image=2))[0].fn
+        result = fn([item])
 
         assert result[0].face_vectors == []
 
     def test_empty_input_passthrough(self) -> None:
-        assert _indexer()._faces([]) == []
+        assert faces_stage(StubInsightFaceModel())[0].fn([]) == []
 
 
 # ---------------------------------------------------------------------------
-# _assign_clusters stage
+# assign_clusters_stage
 # ---------------------------------------------------------------------------
 
 
 class TestAssignClustersStage:
     def test_assigns_cluster_ids_for_each_face(self) -> None:
+        from indexer.face_cluster import FaceClusterer
+
         face_store = _make_face_store()
-        idx = _indexer(face_store=face_store, faces_per_image=2)
+        clusterer = FaceClusterer(face_store)
 
         item = _item("img.jpg")
         item.face_vectors = [[0.1] * 512, [0.9] * 512]
 
-        result = idx._assign_clusters([item])
+        fn = assign_clusters_stage(clusterer)[0].fn
+        result = fn([item])
 
         assert len(result[0].face_cluster_ids) == 2
 
     def test_no_faces_yields_empty_cluster_ids(self) -> None:
-        idx = _indexer()
+        from indexer.face_cluster import FaceClusterer
+
+        face_store = _make_face_store()
+        clusterer = FaceClusterer(face_store)
+
         item = _item()
         item.face_vectors = []
-        result = idx._assign_clusters([item])
+        result = assign_clusters_stage(clusterer)[0].fn([item])
         assert result[0].face_cluster_ids == []
 
 
 # ---------------------------------------------------------------------------
-# _upsert_captions stage
+# upsert_captions_stage
 # ---------------------------------------------------------------------------
 
 
@@ -122,7 +130,6 @@ class TestUpsertCaptionsStage:
     def test_stores_face_cluster_ids_in_metadata(self) -> None:
         caption_store = StubIndexStore()
         caption_store.create_empty()
-        idx = _indexer(caption_store=caption_store)
 
         item = _item("img.jpg")
         item.caption = "a person"
@@ -131,7 +138,7 @@ class TestUpsertCaptionsStage:
         item.exif = {}
         item.face_cluster_ids = ["uuid-1", "uuid-2"]
 
-        idx._upsert_captions([item])
+        upsert_captions_stage(caption_store)[0].fn([item])
 
         meta = caption_store.get_metadata("img.jpg")
         assert meta is not None

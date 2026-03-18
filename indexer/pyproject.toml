@@ -25,6 +25,8 @@ dependencies = [
     "tqdm>=4.66",
     # system memory monitoring for adaptive batching
     "psutil>=5.9",
+    # fast functional utilities (Cython implementation of toolz)
+    "cytoolz>=0.12",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +65,7 @@ disallow_untyped_decorators = false
 # These packages ship no type stubs and have no third-party stub packages.
 module = [
     "chromadb.*",
+    "cytoolz.*",
     "exifread.*",
     "whisper.*",
     "sentence_transformers.*",
