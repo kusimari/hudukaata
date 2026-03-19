@@ -15,13 +15,11 @@ Run:
 
 Requires: nix with flakes enabled.
 
-Output visibility note
-----------------------
-conftest.py installs a capfd.disabled() autouse fixture, which restores fd 1 to
-the real stdout for the duration of every test.  Structured verbose output is
-written to a per-test log file (e2e-verbose-<phase>.log inside the temp work dir)
-and then dumped to stdout via subprocess.run(["cat", ...]) so that it appears as
-a single contiguous block in the CI log, whether the test passes or fails.
+Output visibility
+-----------------
+pytest.ini in this directory sets addopts = -s (--capture=no), which disables
+stdout/stderr capture entirely.  All print() calls appear directly in the CI log
+whether the test passes or fails — no fixture tricks needed.
 """
 
 import json
@@ -50,9 +48,6 @@ _tmpdir: tempfile.TemporaryDirectory | None = None
 WORK_DIR: Path = Path()
 MEDIA_DIR: Path = Path()
 STORE_DIR: Path = Path()
-
-# Per-test verbose log file — set at the start of each test, dumped at the end.
-_LOG_FILE: Path = Path()
 
 
 def setup_module() -> None:
@@ -96,85 +91,54 @@ def teardown_module() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Verbose log helpers
-# ---------------------------------------------------------------------------
-# All structured output (store state, API responses) is written to _LOG_FILE via
-# _emit().  dump_log() reads the file and dumps it to stdout via subprocess.run
-# (["cat", ...]).  Because conftest.py installs capfd.disabled(), fd 1 is the
-# real stdout throughout the test, so the cat output is always visible in CI.
-
-
-def _emit(msg: str) -> None:
-    """Append msg to the current test's verbose log file."""
-    with _LOG_FILE.open("a") as f:
-        f.write(msg + "\n")
-
-
-def dump_log() -> None:
-    """Dump the verbose log file to stdout via cat and print its path.
-
-    Using subprocess.run(["cat"]) rather than print() is the user's explicit
-    choice: it writes to the inherited fd 1, making the mechanism independent of
-    Python's sys.stdout buffering and explicit about what is happening.
-    """
-    if not _LOG_FILE.exists() or not _LOG_FILE.stat().st_size:
-        return
-    print(f"\n{'~' * 72}", flush=True)
-    print(f"  Verbose log: {_LOG_FILE}", flush=True)
-    print(f"{'~' * 72}", flush=True)
-    subprocess.run(["cat", str(_LOG_FILE)], check=False)
-    print(f"{'~' * 72}\n", flush=True)
-
-
-# ---------------------------------------------------------------------------
-# Structured output helpers  (write to log file, not directly to stdout)
+# Output helpers  (plain print — visible because pytest.ini sets addopts = -s)
 # ---------------------------------------------------------------------------
 
 
 def _banner(msg: str) -> None:
-    """Write a wide visual separator to the verbose log."""
+    """Print a wide visual separator so each verification section stands out."""
     width = 72
-    _emit(f"\n{'=' * width}")
-    _emit(f"  {msg}")
-    _emit(f"{'=' * width}")
+    print(f"\n{'=' * width}", flush=True)
+    print(f"  {msg}", flush=True)
+    print(f"{'=' * width}", flush=True)
 
 
 def print_store_state(label: str) -> None:
-    """Walk STORE_DIR and log the file tree, sizes, and index_meta.json."""
+    """Walk STORE_DIR and print the file tree, sizes, and index_meta.json."""
     _banner(label)
-    _emit(f"Store root: {STORE_DIR}\n")
+    print(f"Store root: {STORE_DIR}\n", flush=True)
 
     all_paths = sorted(STORE_DIR.rglob("*"))
     if not any(p.is_file() for p in all_paths):
-        _emit("  (store is empty)")
+        print("  (store is empty)", flush=True)
     else:
         for p in all_paths:
             if p.is_file():
                 size = p.stat().st_size
                 rel = p.relative_to(STORE_DIR)
-                _emit(f"  {rel}  ({size:,} bytes)")
+                print(f"  {rel}  ({size:,} bytes)", flush=True)
 
     # index_meta.json records what the indexer wrote (store names, timestamp, version)
     meta_path = STORE_DIR / "db" / "index_meta.json"
     if meta_path.exists():
-        _emit("\n  index_meta.json:")
+        print("\n  index_meta.json:", flush=True)
         meta = json.loads(meta_path.read_text())
         for k, v in meta.items():
-            _emit(f"    {k}: {v}")
+            print(f"    {k}: {v}", flush=True)
     else:
-        _emit("\n  index_meta.json: (not yet created)")
+        print("\n  index_meta.json: (not yet created)", flush=True)
 
 
-def _log_search_response(label: str, resp: httpx.Response) -> None:
-    """Log a JSON search/faces response with a labelled banner."""
+def _print_search_response(label: str, resp: httpx.Response) -> None:
+    """Pretty-print a JSON search/faces response with a labelled banner."""
     _banner(label)
-    _emit(f"  URL    : {resp.url}")
-    _emit(f"  Status : {resp.status_code}")
+    print(f"  URL    : {resp.url}", flush=True)
+    print(f"  Status : {resp.status_code}", flush=True)
     try:
         data = resp.json()
-        _emit(f"  Body   :\n{json.dumps(data, indent=4)}")
+        print(f"  Body   :\n{json.dumps(data, indent=4)}", flush=True)
     except Exception:
-        _emit(f"  Body   : {resp.text[:500]}")
+        print(f"  Body   : {resp.text[:500]}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -286,10 +250,6 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
 
 
 def test_phase1_subdir_a() -> None:
-    global _LOG_FILE
-    _LOG_FILE = WORK_DIR / "e2e-verbose-phase1.log"
-    _LOG_FILE.unlink(missing_ok=True)
-
     conf = WORK_DIR / "phase1.conf"
     write_conf(conf, folder="subdir_a")
 
@@ -309,7 +269,7 @@ def test_phase1_subdir_a() -> None:
             f"http://localhost:{SEARCH_PORT}/search?q=blue+sky&n=5"
         )
         resp_direct.raise_for_status()
-        _log_search_response(
+        _print_search_response(
             f"Phase 1 — GET /search?q=blue+sky&n=5  (search API, port {SEARCH_PORT})",
             resp_direct,
         )
@@ -318,7 +278,7 @@ def test_phase1_subdir_a() -> None:
         # Faces API — direct (port SEARCH_PORT)
         # ------------------------------------------------------------------
         resp_faces = client.get(f"http://localhost:{SEARCH_PORT}/faces?n=10")
-        _log_search_response(
+        _print_search_response(
             f"Phase 1 — GET /faces?n=10  (search API, port {SEARCH_PORT})",
             resp_faces,
         )
@@ -328,25 +288,21 @@ def test_phase1_subdir_a() -> None:
         # ------------------------------------------------------------------
         _banner(f"Phase 1 — GET /  (webapp, port {WEBAPP_PORT})")
         resp_html = client.get(f"http://localhost:{WEBAPP_PORT}/")
-        _emit(f"  Status : {resp_html.status_code}")
-        _emit(f"  Body   : {resp_html.text[:300].replace(chr(10), ' ').strip()}...")
+        print(f"  Status : {resp_html.status_code}", flush=True)
+        print(
+            f"  Body   : {resp_html.text[:300].replace(chr(10), ' ').strip()}...",
+            flush=True,
+        )
 
         # ------------------------------------------------------------------
         # Search via webapp proxy (port WEBAPP_PORT → search API)
         # ------------------------------------------------------------------
         resp = client.get(f"http://localhost:{WEBAPP_PORT}/api/search?q=blue+sky&n=5")
         resp.raise_for_status()
-        _log_search_response(
+        _print_search_response(
             f"Phase 1 — GET /api/search?q=blue+sky&n=5  (webapp proxy, port {WEBAPP_PORT})",
             resp,
         )
-
-        # ------------------------------------------------------------------
-        # Dump the verbose log before assertions so it is always visible.
-        # subprocess.run(["cat"]) writes to the real fd 1 (restored by
-        # capfd.disabled() in conftest.py), bypassing pytest's capture.
-        # ------------------------------------------------------------------
-        dump_log()
 
         # ------------------------------------------------------------------
         # Assertions
@@ -371,10 +327,6 @@ def test_phase1_subdir_a() -> None:
 
 
 def test_phase2_subdir_b_incremental() -> None:
-    global _LOG_FILE
-    _LOG_FILE = WORK_DIR / "e2e-verbose-phase2.log"
-    _LOG_FILE.unlink(missing_ok=True)
-
     conf = WORK_DIR / "phase2.conf"
     write_conf(conf, folder="subdir_b")
 
@@ -394,7 +346,7 @@ def test_phase2_subdir_b_incremental() -> None:
             f"http://localhost:{SEARCH_PORT}/search?q=outdoor&n=10"
         )
         resp_direct.raise_for_status()
-        _log_search_response(
+        _print_search_response(
             f"Phase 2 — GET /search?q=outdoor&n=10  (search API, port {SEARCH_PORT})",
             resp_direct,
         )
@@ -403,7 +355,7 @@ def test_phase2_subdir_b_incremental() -> None:
         # Faces API — should now reflect images from both subdirs
         # ------------------------------------------------------------------
         resp_faces = client.get(f"http://localhost:{SEARCH_PORT}/faces?n=10")
-        _log_search_response(
+        _print_search_response(
             f"Phase 2 — GET /faces?n=10  (search API, port {SEARCH_PORT})",
             resp_faces,
         )
@@ -413,23 +365,21 @@ def test_phase2_subdir_b_incremental() -> None:
         # ------------------------------------------------------------------
         _banner(f"Phase 2 — GET /  (webapp, port {WEBAPP_PORT})")
         resp_html = client.get(f"http://localhost:{WEBAPP_PORT}/")
-        _emit(f"  Status : {resp_html.status_code}")
-        _emit(f"  Body   : {resp_html.text[:300].replace(chr(10), ' ').strip()}...")
+        print(f"  Status : {resp_html.status_code}", flush=True)
+        print(
+            f"  Body   : {resp_html.text[:300].replace(chr(10), ' ').strip()}...",
+            flush=True,
+        )
 
         # ------------------------------------------------------------------
         # Search via webapp proxy
         # ------------------------------------------------------------------
         resp = client.get(f"http://localhost:{WEBAPP_PORT}/api/search?q=outdoor&n=10")
         resp.raise_for_status()
-        _log_search_response(
+        _print_search_response(
             f"Phase 2 — GET /api/search?q=outdoor&n=10  (webapp proxy, port {WEBAPP_PORT})",
             resp,
         )
-
-        # ------------------------------------------------------------------
-        # Dump the verbose log before assertions.
-        # ------------------------------------------------------------------
-        dump_log()
 
         # ------------------------------------------------------------------
         # Assertions
