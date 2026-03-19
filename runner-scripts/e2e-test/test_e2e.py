@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Generator
 
 import httpx
-import pytest
 
 SCRIPT_DIR = Path(__file__).parent
 RUNNERS = SCRIPT_DIR.parent
@@ -58,7 +57,7 @@ def setup_module() -> None:
     STORE_DIR.mkdir()
 
     # subdir_a: the two sample images bundled with the test
-    shutil.copy(SAMPLES / "blue_sky.png",    MEDIA_DIR / "subdir_a")
+    shutil.copy(SAMPLES / "blue_sky.png", MEDIA_DIR / "subdir_a")
     shutil.copy(SAMPLES / "green_field.png", MEDIA_DIR / "subdir_a")
 
     # subdir_b: a synthetic image generated at runtime via PIL inside the
@@ -66,8 +65,12 @@ def setup_module() -> None:
     print("\n==> Generating subdir_b/red_sunset.png...")
     subprocess.run(
         [
-            "nix", "develop", f"{REPO}#indexer", "--command",
-            "python3", "-c",
+            "nix",
+            "develop",
+            f"{REPO}#indexer",
+            "--command",
+            "python3",
+            "-c",
             "from PIL import Image; "
             f"Image.new('RGB', (64,64), (200,80,30))"
             f".save('{MEDIA_DIR}/subdir_b/red_sunset.png')",
@@ -86,11 +89,47 @@ def teardown_module() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _banner(msg: str) -> None:
+    """Print a wide visual separator so each verification section stands out."""
+    width = 72
+    print(f"\n{'=' * width}", flush=True)
+    print(f"  {msg}", flush=True)
+    print(f"{'=' * width}", flush=True)
+
+
+def print_store_state(label: str) -> None:
+    """Walk STORE_DIR and print the file tree, sizes, and index_meta.json."""
+    _banner(label)
+    print(f"Store root: {STORE_DIR}\n", flush=True)
+
+    all_paths = sorted(STORE_DIR.rglob("*"))
+    if not any(p.is_file() for p in all_paths):
+        print("  (store is empty)", flush=True)
+    else:
+        for p in all_paths:
+            if p.is_file():
+                size = p.stat().st_size
+                rel = p.relative_to(STORE_DIR)
+                print(f"  {rel}  ({size:,} bytes)", flush=True)
+
+    # index_meta.json records what the indexer wrote (store names, timestamp, version)
+    meta_path = STORE_DIR / "db" / "index_meta.json"
+    if meta_path.exists():
+        print("\n  index_meta.json:", flush=True)
+        meta = json.loads(meta_path.read_text())
+        for k, v in meta.items():
+            print(f"    {k}: {v}", flush=True)
+    else:
+        print("\n  index_meta.json: (not yet created)", flush=True)
+
+
 def write_conf(path: Path, folder: str = "") -> None:
     lines = [
         f"media           = file://{MEDIA_DIR}",
         f"store           = file://{STORE_DIR}",
         "caption_model   = blip2_faces",
+        # Load face store in the search server to match the face-aware indexer.
+        "indexer_key     = blip2-sentok-exif-insightface",
         "log_level       = INFO",
         f"search_port     = {SEARCH_PORT}",
         "search_api_host = http://localhost",
@@ -101,7 +140,9 @@ def write_conf(path: Path, folder: str = "") -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
-def wait_until_ready(url: str, label: str, proc: subprocess.Popen, timeout: int = 3600) -> None:
+def wait_until_ready(
+    url: str, label: str, proc: subprocess.Popen, timeout: int = 3600
+) -> None:
     """Poll url until it responds 200, the process exits, or timeout is reached.
 
     A large default timeout is intentional: on first run, nix develop sets up
@@ -133,7 +174,8 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
     try:
         sp = subprocess.Popen(
             [str(RUNNERS / "search.sh"), str(conf)],
-            stdout=search_log.open("w"), stderr=subprocess.STDOUT,
+            stdout=search_log.open("w"),
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
         procs.append(sp)
@@ -145,7 +187,8 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
 
         wp = subprocess.Popen(
             [str(RUNNERS / "webapp.sh"), str(conf)],
-            stdout=webapp_log.open("w"), stderr=subprocess.STDOUT,
+            stdout=webapp_log.open("w"),
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
         procs.append(wp)
@@ -178,6 +221,18 @@ def running_services(conf: Path) -> Generator[httpx.Client, None, None]:
         time.sleep(1)  # allow ports to be released before the next start
 
 
+def _print_search_response(label: str, resp: httpx.Response) -> None:
+    """Pretty-print a JSON search/faces response with a labelled banner."""
+    _banner(label)
+    print(f"  URL    : {resp.url}", flush=True)
+    print(f"  Status : {resp.status_code}", flush=True)
+    try:
+        data = resp.json()
+        print(f"  Body   :\n{json.dumps(data, indent=4)}", flush=True)
+    except Exception:
+        print(f"  Body   : {resp.text[:500]}", flush=True)
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: run index.sh scoped to subdir_a; verify search is scoped correctly
 # ---------------------------------------------------------------------------
@@ -190,20 +245,67 @@ def test_phase1_subdir_a() -> None:
     print("\n==> [Phase 1] Running index.sh for subdir_a...")
     subprocess.run([str(RUNNERS / "index.sh"), str(conf)], check=True)
 
-    with running_services(conf) as client:
-        # webapp serves HTML
-        resp = client.get(f"http://localhost:{WEBAPP_PORT}/")
-        assert resp.status_code == 200
-        assert "<html" in resp.text.lower()
+    # -----------------------------------------------------------------------
+    # Store inspection — confirm caption + face stores were created
+    # -----------------------------------------------------------------------
+    print_store_state("Phase 1 store state — after indexing subdir_a")
 
-        # search returns results — all from subdir_a (folder scoping is working)
+    with running_services(conf) as client:
+        # ------------------------------------------------------------------
+        # Search API — direct (port SEARCH_PORT)
+        # ------------------------------------------------------------------
+        resp_direct = client.get(
+            f"http://localhost:{SEARCH_PORT}/search?q=blue+sky&n=5"
+        )
+        resp_direct.raise_for_status()
+        _print_search_response(
+            f"Phase 1 — GET /search?q=blue+sky&n=5  (search API direct, port {SEARCH_PORT})",
+            resp_direct,
+        )
+
+        # ------------------------------------------------------------------
+        # Faces API — direct (port SEARCH_PORT)
+        # ------------------------------------------------------------------
+        resp_faces = client.get(f"http://localhost:{SEARCH_PORT}/faces?n=10")
+        _print_search_response(
+            f"Phase 1 — GET /faces?n=10  (search API direct, port {SEARCH_PORT})",
+            resp_faces,
+        )
+
+        # ------------------------------------------------------------------
+        # Webapp HTML (port WEBAPP_PORT)
+        # ------------------------------------------------------------------
+        _banner(f"Phase 1 — GET /  (webapp, port {WEBAPP_PORT})")
+        resp_html = client.get(f"http://localhost:{WEBAPP_PORT}/")
+        print(f"  Status : {resp_html.status_code}", flush=True)
+        snippet = resp_html.text[:300].replace("\n", " ").strip()
+        print(f"  Body   : {snippet}...", flush=True)
+
+        # ------------------------------------------------------------------
+        # Search via webapp proxy (port WEBAPP_PORT → search API)
+        # ------------------------------------------------------------------
         resp = client.get(f"http://localhost:{WEBAPP_PORT}/api/search?q=blue+sky&n=5")
         resp.raise_for_status()
+        _print_search_response(
+            f"Phase 1 — GET /api/search?q=blue+sky&n=5  (via webapp proxy, port {WEBAPP_PORT})",
+            resp,
+        )
+
+        # ------------------------------------------------------------------
+        # Assertions
+        # ------------------------------------------------------------------
+        assert resp_html.status_code == 200
+        assert "<html" in resp_html.text.lower()
+
         results: list[dict] = resp.json()
         paths = [r["relative_path"] for r in results]
         assert len(results) >= 1, f"expected >= 1 result, got: {results}"
-        assert all("subdir_a" in p for p in paths), f"unexpected paths in phase 1: {paths}"
-        assert not any("subdir_b" in p for p in paths), f"subdir_b appeared before it was indexed: {paths}"
+        assert all("subdir_a" in p for p in paths), (
+            f"unexpected paths in phase 1: {paths}"
+        )
+        assert not any("subdir_b" in p for p in paths), (
+            f"subdir_b appeared before it was indexed: {paths}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -218,21 +320,70 @@ def test_phase2_subdir_b_incremental() -> None:
     print("\n==> [Phase 2] Running index.sh for subdir_b (incremental)...")
     subprocess.run([str(RUNNERS / "index.sh"), str(conf)], check=True)
 
-    with running_services(conf) as client:
-        # webapp still serves HTML
-        resp = client.get(f"http://localhost:{WEBAPP_PORT}/")
-        assert resp.status_code == 200
-        assert "<html" in resp.text.lower()
+    # -----------------------------------------------------------------------
+    # Store inspection — confirm stores were updated (same files, newer data)
+    # -----------------------------------------------------------------------
+    print_store_state("Phase 2 store state — after incremental index of subdir_b")
 
-        # all 3 files (2 from subdir_a + 1 from subdir_b) are searchable
+    with running_services(conf) as client:
+        # ------------------------------------------------------------------
+        # Search API — direct, broad query to surface all 3 files
+        # ------------------------------------------------------------------
+        resp_direct = client.get(
+            f"http://localhost:{SEARCH_PORT}/search?q=outdoor&n=10"
+        )
+        resp_direct.raise_for_status()
+        _print_search_response(
+            f"Phase 2 — GET /search?q=outdoor&n=10  (search API direct, port {SEARCH_PORT})",
+            resp_direct,
+        )
+
+        # ------------------------------------------------------------------
+        # Faces API — should now reflect images from both subdirs
+        # ------------------------------------------------------------------
+        resp_faces = client.get(f"http://localhost:{SEARCH_PORT}/faces?n=10")
+        _print_search_response(
+            f"Phase 2 — GET /faces?n=10  (search API direct, port {SEARCH_PORT})",
+            resp_faces,
+        )
+
+        # ------------------------------------------------------------------
+        # Webapp HTML
+        # ------------------------------------------------------------------
+        _banner(f"Phase 2 — GET /  (webapp, port {WEBAPP_PORT})")
+        resp_html = client.get(f"http://localhost:{WEBAPP_PORT}/")
+        print(f"  Status : {resp_html.status_code}", flush=True)
+        snippet = resp_html.text[:300].replace("\n", " ").strip()
+        print(f"  Body   : {snippet}...", flush=True)
+
+        # ------------------------------------------------------------------
+        # Search via webapp proxy
+        # ------------------------------------------------------------------
         resp = client.get(f"http://localhost:{WEBAPP_PORT}/api/search?q=outdoor&n=10")
         resp.raise_for_status()
+        _print_search_response(
+            f"Phase 2 — GET /api/search?q=outdoor&n=10  (via webapp proxy, port {WEBAPP_PORT})",
+            resp,
+        )
+
+        # ------------------------------------------------------------------
+        # Assertions
+        # ------------------------------------------------------------------
+        assert resp_html.status_code == 200
+        assert "<html" in resp_html.text.lower()
+
         results = resp.json()
         paths = [r["relative_path"] for r in results]
-        assert len(results) >= 3, f"expected >= 3 results after incremental update, got: {results}"
+        assert len(results) >= 3, (
+            f"expected >= 3 results after incremental update, got: {results}"
+        )
 
         # subdir_b path is present — confirms the incremental update was applied
-        assert any("subdir_b" in p for p in paths), f"subdir_b missing from results: {paths}"
+        assert any("subdir_b" in p for p in paths), (
+            f"subdir_b missing from results: {paths}"
+        )
 
         # subdir_a path still present — no data was lost
-        assert any("subdir_a" in p for p in paths), f"subdir_a lost after phase 2: {paths}"
+        assert any("subdir_a" in p for p in paths), (
+            f"subdir_a lost after phase 2: {paths}"
+        )
