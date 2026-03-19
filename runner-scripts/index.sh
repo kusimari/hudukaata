@@ -30,6 +30,7 @@ CAPTION=$(cfg caption_model blip2)
 LOG=$(cfg log_level INFO)
 FOLDER=$(cfg folder "")
 CHECKPOINT=$(cfg checkpoint_interval "")
+CLUSTER_THRESHOLD=$(cfg cluster_threshold "")
 
 if [ -z "$MEDIA" ] || [ -z "$STORE" ]; then
   echo "ERROR: 'media' and 'store' are required in $CONF" >&2
@@ -38,9 +39,10 @@ fi
 
 # Map caption_model name to the indexer registry key used by `indexer index`.
 case "$CAPTION" in
-  blip2) INDEXER_KEY="blip2_sentok_exif_chroma" ;;
+  blip2)       INDEXER_KEY="blip2_sentok_exif_chroma" ;;
+  blip2_faces) INDEXER_KEY="blip2_sentok_exif_insightface_chroma" ;;
   *)
-    echo "ERROR: unknown caption_model '$CAPTION' — supported values: blip2" >&2
+    echo "ERROR: unknown caption_model '$CAPTION' — supported values: blip2, blip2_faces" >&2
     exit 1
     ;;
 esac
@@ -63,6 +65,7 @@ export _IDX_INDEXER_KEY="$INDEXER_KEY"
 export _IDX_LOG="$LOG"
 export _IDX_FOLDER="$FOLDER"
 export _IDX_CHECKPOINT="$CHECKPOINT"
+export _IDX_CLUSTER_THRESHOLD="$CLUSTER_THRESHOLD"
 export TMP_JSON
 
 python3 - <<'PYEOF'
@@ -70,6 +73,7 @@ import json, os
 
 folder = os.environ.get("_IDX_FOLDER") or None
 checkpoint_raw = os.environ.get("_IDX_CHECKPOINT", "")
+cluster_threshold_raw = os.environ.get("_IDX_CLUSTER_THRESHOLD", "")
 config = {
     "indexer": os.environ["_IDX_INDEXER_KEY"],
     "media_uri": os.environ["_IDX_MEDIA"],
@@ -78,6 +82,8 @@ config = {
     "checkpoint_interval": int(checkpoint_raw) if checkpoint_raw else 0,
     "log_level": os.environ["_IDX_LOG"],
 }
+if cluster_threshold_raw:
+    config["cluster_threshold"] = float(cluster_threshold_raw)
 with open(os.environ["TMP_JSON"], "w") as f:
     json.dump(config, f, indent=2)
 PYEOF

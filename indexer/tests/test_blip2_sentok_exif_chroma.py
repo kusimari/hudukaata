@@ -8,6 +8,14 @@ from common.media import MediaFile
 
 from indexer.indexers.blip2_sentok_exif_chroma import Blip2SentTokExifChromaIndexer
 from indexer.pipeline import BatchItem
+from indexer.stages import (
+    caption_stage,
+    close_stage,
+    exif_stage,
+    format_text_stage,
+    open_stage,
+    upsert_captions_stage,
+)
 from tests.stubs.caption_model import StubCaptionModel
 from tests.stubs.index_store import StubIndexStore
 
@@ -39,7 +47,7 @@ def _indexer(
 
 
 # ---------------------------------------------------------------------------
-# _open stage
+# open_stage
 # ---------------------------------------------------------------------------
 
 
@@ -49,8 +57,8 @@ class TestOpenStage:
         item.media_file.__enter__ = lambda s: s
         item.media_file.__exit__ = lambda s, *a: None
 
-        idx = _indexer()
-        result = idx._open([item])
+        fn = open_stage()[0].fn
+        result = fn([item])
 
         assert len(result) == 1
         assert result[0].file_mtime == "9999.0"
@@ -60,27 +68,27 @@ class TestOpenStage:
         item.media_file.__enter__ = lambda s: s
         item.media_file.__exit__ = lambda s, *a: None
 
-        idx = _indexer()
-        result = idx._open([item])
+        fn = open_stage()[0].fn
+        result = fn([item])
         assert result[0].file_mtime == ""
 
     def test_failed_open_drops_item_and_logs(self) -> None:
         item = _item()
         item.media_file.__enter__ = MagicMock(side_effect=OSError("no such file"))
 
-        idx = _indexer()
-        with patch("indexer.indexers.blip2_sentok_exif_chroma.logger") as mock_log:
-            result = idx._open([item])
+        fn = open_stage()[0].fn
+        with patch("indexer.stages.logger") as mock_log:
+            result = fn([item])
 
         assert result == []
         mock_log.warning.assert_called_once()
 
     def test_empty_input(self) -> None:
-        assert _indexer()._open([]) == []
+        assert open_stage()[0].fn([]) == []
 
 
 # ---------------------------------------------------------------------------
-# _caption stage
+# caption_stage
 # ---------------------------------------------------------------------------
 
 
@@ -94,14 +102,14 @@ class TestCaptionStage:
 
     def test_sets_caption_on_each_item(self) -> None:
         items = [self._open_item("a.jpg"), self._open_item("b.jpg")]
-        idx = _indexer()
-        result = idx._caption(items)
+        fn = caption_stage(StubCaptionModel())[0].fn
+        result = fn(items)
         assert len(result) == 2
         assert result[0].caption == "a.jpg"
         assert result[1].caption == "b.jpg"
 
     def test_empty_input(self) -> None:
-        assert _indexer()._caption([]) == []
+        assert caption_stage(StubCaptionModel())[0].fn([]) == []
 
     def test_failed_caption_drops_all_and_closes_stacks(self) -> None:
         items = [self._open_item("a.jpg"), self._open_item("b.jpg")]
@@ -119,48 +127,42 @@ class TestCaptionStage:
             def caption_batch(self, mfs):  # type: ignore[override]
                 raise RuntimeError("model failed")
 
-        idx = _indexer(caption_model=FailModel())
-        with patch("indexer.indexers.blip2_sentok_exif_chroma.logger"):
-            result = idx._caption(items)
+        fn = caption_stage(FailModel())[0].fn
+        with patch("indexer.stages.logger"):
+            result = fn(items)
 
         assert result == []
         assert set(closed) == {"a.jpg", "b.jpg"}
 
 
 # ---------------------------------------------------------------------------
-# _exif stage
+# exif_stage
 # ---------------------------------------------------------------------------
 
 
 class TestExifStage:
     def test_populates_exif_field(self) -> None:
         item = _item()
-        with patch(
-            "indexer.indexers.blip2_sentok_exif_chroma.extract_exif",
-            return_value={"width": "100"},
-        ):
-            result = _indexer()._exif([item])
+        with patch("indexer.stages.extract_exif", return_value={"width": "100"}):
+            result = exif_stage()[0].fn([item])
         assert result[0].exif == {"width": "100"}
 
     def test_exif_failure_logs_and_continues(self) -> None:
         item = _item()
         with (
-            patch(
-                "indexer.indexers.blip2_sentok_exif_chroma.extract_exif",
-                side_effect=RuntimeError("bad"),
-            ),
-            patch("indexer.indexers.blip2_sentok_exif_chroma.logger") as mock_log,
+            patch("indexer.stages.extract_exif", side_effect=RuntimeError("bad")),
+            patch("indexer.stages.logger") as mock_log,
         ):
-            result = _indexer()._exif([item])
+            result = exif_stage()[0].fn([item])
         assert result == [item]
         mock_log.warning.assert_called_once()
 
     def test_empty_input(self) -> None:
-        assert _indexer()._exif([]) == []
+        assert exif_stage()[0].fn([]) == []
 
 
 # ---------------------------------------------------------------------------
-# _format_text stage
+# format_text_stage
 # ---------------------------------------------------------------------------
 
 
@@ -169,20 +171,20 @@ class TestFormatTextStage:
         item = _item()
         item.caption = "a sunset"
         item.exif = {}
-        result = _indexer()._format_text([item])
+        result = format_text_stage()[0].fn([item])
         assert result[0].text == "a sunset"
 
     def test_includes_exif_in_text(self) -> None:
         item = _item()
         item.caption = "cat"
         item.exif = {"width": "100"}
-        result = _indexer()._format_text([item])
+        result = format_text_stage()[0].fn([item])
         assert "EXIF" in result[0].text
         assert "width: 100" in result[0].text
 
 
 # ---------------------------------------------------------------------------
-# _upsert stage
+# upsert_stage
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +192,6 @@ class TestUpsertStage:
     def test_calls_upsert_batch(self) -> None:
         store = StubIndexStore()
         store.create_empty()
-        idx = _indexer(index_store=store)
 
         item = _item("a.jpg")
         item.caption = "a cat"
@@ -198,7 +199,7 @@ class TestUpsertStage:
         item.text = "a cat"
         item.exif = {}
 
-        result = idx._upsert([item])
+        result = upsert_captions_stage(store)[0].fn([item])
 
         assert result == [item]
         assert store.get_metadata("a.jpg") is not None
@@ -206,12 +207,11 @@ class TestUpsertStage:
     def test_empty_input(self) -> None:
         store = StubIndexStore()
         store.create_empty()
-        idx = _indexer(index_store=store)
-        assert idx._upsert([]) == []
+        assert upsert_captions_stage(store)[0].fn([]) == []
 
 
 # ---------------------------------------------------------------------------
-# _close stage
+# close_stage
 # ---------------------------------------------------------------------------
 
 
@@ -223,12 +223,12 @@ class TestCloseStage:
             p = item.media_file.relative_path
             item._stack.callback(lambda path=p: closed.append(path))
 
-        _indexer()._close(items)
+        close_stage()[0].fn(items)
         assert set(closed) == {"a.jpg", "b.jpg"}
 
     def test_returns_all_items(self) -> None:
         items = [_item()]
-        result = _indexer()._close(items)
+        result = close_stage()[0].fn(items)
         assert result == items
 
 
@@ -246,10 +246,13 @@ class TestPipelineAssembly:
         expected = [False, True, False, False, True, False]
         assert [s.batched for s in p] == expected
 
-    def test_last_stage_is_close(self) -> None:
-        idx = _indexer()
-        p = idx.pipeline()
-        assert p[-1].fn == idx._close
+    def test_last_stage_closes_stacks(self) -> None:
+        p = _indexer().pipeline()
+        item = _item()
+        closed: list[str] = []
+        item._stack.callback(lambda: closed.append("done"))
+        p[-1].fn([item])
+        assert closed == ["done"]
 
 
 # ---------------------------------------------------------------------------

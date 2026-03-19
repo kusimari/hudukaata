@@ -14,8 +14,8 @@ Clean up `.kdevkit` so files are minimal, MECE, and reusable:
 ## Design
 
 **Generic files (portable to any project):**
-- `feature-dev.md` — 3-phase feature workflow (plan → implement → human review)
-- `agent-dev-loop.md` — Phase 2 loop (setup → code → quality → test → auto-review → human-ready) + git prefix conventions
+- `outerspace-loop.md` — 3-phase feature workflow (plan → implement → human review)
+- `innerspace-loop.md` — Phase 2 loop (setup → code → quality → test → auto-review → human-ready) + git prefix conventions
 - `review.md` — incremental and PR review criteria, severity definitions, output format
 
 **Project-specific:**

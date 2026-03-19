@@ -28,6 +28,7 @@ MEDIA=$(cfg media)
 STORE=$(cfg store)
 PORT=$(cfg search_port 8080)
 LOG=$(cfg log_level INFO)
+INDEXER_KEY=$(cfg indexer_key blip2-sentok-exif)
 
 if [ -z "$MEDIA" ] || [ -z "$STORE" ]; then
   echo "ERROR: 'media' and 'store' are required in $CONF" >&2
@@ -44,11 +45,12 @@ export _SRCH_STORE="$STORE"
 export _SRCH_MEDIA="$MEDIA"
 export _SRCH_PORT="$PORT"
 export _SRCH_LOG="$LOG"
+export _SRCH_INDEXER_KEY="$INDEXER_KEY"
 
 nix develop "$REPO#search" --command bash -c '
   SEARCH_STORE="$_SRCH_STORE" \
   SEARCH_MEDIA="$_SRCH_MEDIA" \
   SEARCH_PORT="$_SRCH_PORT" \
   SEARCH_LOG_LEVEL="$_SRCH_LOG" \
-  python -m search
+  python -m search serve "$_SRCH_INDEXER_KEY"
 '

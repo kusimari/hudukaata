@@ -23,6 +23,7 @@ import tempfile
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from common.base import INDEXER_VERSION, IndexMeta, StorePointer
 from common.index import IndexStore
@@ -73,9 +74,10 @@ class IndexingRunner:
         pipeline: Pipeline,
         media: MediaSource,
         store: StorePointer,
-        index_store: IndexStore,
+        index_store: IndexStore[Any],
         index_store_name: str,
         folder: str | None = None,
+        secondary_stores: list[tuple[IndexStore[Any], str]] | None = None,
     ) -> None:
         """Execute a full indexing run.
 
@@ -83,12 +85,14 @@ class IndexingRunner:
             pipeline: Ordered list of stages to apply to each item.
             media: Source of media files to index.
             store: Pointer to the persistent store directory.
-            index_store: Index store to read/write; must be uninitialised
+            index_store: Primary index store (caption store); must be uninitialised
                 (neither :meth:`~common.index.IndexStore.load` nor
                 :meth:`~common.index.IndexStore.create_empty` called yet).
-            index_store_name: Human-readable name recorded in
-                :class:`~common.base.IndexMeta`.
+            index_store_name: Dotted class path recorded in :class:`~common.base.IndexMeta`.
             folder: Optional subfolder within *media* to restrict scanning.
+            secondary_stores: Optional list of ``(store, store_name)`` tuples for
+                additional stores (e.g. face store).  Each store is initialised,
+                saved, and checkpointed alongside the primary store.
         """
         cleanup_stale_tmp(store)
         with tempfile.TemporaryDirectory(prefix="indexer_run_") as tmp_str:
@@ -100,6 +104,7 @@ class IndexingRunner:
                 Path(tmp_str),
                 index_store_name,
                 folder,
+                secondary_stores,
             )
 
     # ------------------------------------------------------------------
@@ -111,12 +116,13 @@ class IndexingRunner:
         pipeline: Pipeline,
         media: MediaSource,
         store: StorePointer,
-        index_store: IndexStore,
+        index_store: IndexStore[Any],
         local_tmp: Path,
         index_store_name: str,
         folder: str | None,
+        secondary_stores: list[tuple[IndexStore[Any], str]] | None = None,
     ) -> None:
-        existing_created_at, force_reindex = self._setup_db(store, index_store)
+        existing_created_at, force_reindex = self._setup_db(store, index_store, secondary_stores)
         prepare_temp_dir(store, local_tmp)
 
         logger.info(
@@ -128,13 +134,23 @@ class IndexingRunner:
         source = self._scan_and_skip(media, folder, index_store, force_reindex)
 
         for processed, _ in enumerate(self._runner.stream(pipeline, source), 1):
-            self._maybe_checkpoint(processed, store, index_store, local_tmp)
+            self._maybe_checkpoint(processed, store, index_store, local_tmp, secondary_stores)
 
         db_new_path = local_tmp / "db_new"
         index_store.save(db_new_path)
+        face_store_name: str | None = None
+        if secondary_stores:
+            # Currently only one secondary store (face store) is supported.
+            face_store_name = secondary_stores[0][1]
+            for sec_store, _ in secondary_stores:
+                sec_store.save(db_new_path)
         logger.info("Saved new DB to %s", db_new_path)
 
-        meta = IndexMeta.now(source=media.uri, index_store=index_store_name)
+        meta = IndexMeta.now(
+            source=media.uri,
+            index_store=index_store_name,
+            face_store=face_store_name,
+        )
         meta.save(db_new_path / "index_meta.json")
 
         store.put_dir(db_new_path, dest_name="db_new")
@@ -144,7 +160,8 @@ class IndexingRunner:
     def _setup_db(
         self,
         store: StorePointer,
-        index_store: IndexStore,
+        index_store: IndexStore[Any],
+        secondary_stores: list[tuple[IndexStore[Any], str]] | None = None,
     ) -> tuple[datetime | None, bool]:
         """Load or create the DB; return (created_at, force_reindex)."""
         existing_created_at: datetime | None = None
@@ -171,14 +188,27 @@ class IndexingRunner:
                         INDEXER_VERSION,
                     )
                     index_store.create_empty()
+                    if secondary_stores:
+                        for sec_store, _ in secondary_stores:
+                            sec_store.create_empty()
                 else:
                     logger.info(
                         "Existing DB found (created at %s); updating incrementally.",
                         existing_created_at,
                     )
                     index_store.load_for_update(existing_db_path)
+                    if secondary_stores:
+                        for sec_store, _ in secondary_stores:
+                            try:
+                                sec_store.load_for_update(existing_db_path)
+                            except FileNotFoundError:
+                                # Secondary store not present yet (e.g. first face run).
+                                sec_store.create_empty()
         else:
             index_store.create_empty()
+            if secondary_stores:
+                for sec_store, _ in secondary_stores:
+                    sec_store.create_empty()
 
         return existing_created_at, force_reindex
 
@@ -186,7 +216,7 @@ class IndexingRunner:
         self,
         media: MediaSource,
         folder: str | None,
-        index_store: IndexStore,
+        index_store: IndexStore[Any],
         force_reindex: bool,
     ) -> Iterator[BatchItem]:
         """Yield a :class:`~indexer.pipeline.BatchItem` for each file to process."""
@@ -216,27 +246,32 @@ class IndexingRunner:
         self,
         n_processed: int,
         store: StorePointer,
-        index_store: IndexStore,
+        index_store: IndexStore[Any],
         local_tmp: Path,
+        secondary_stores: list[tuple[IndexStore[Any], str]] | None = None,
     ) -> None:
         ci = self._checkpoint_interval
         if ci < 0:
             return
         if ci == 0:
-            self._write_checkpoint(n_processed, store, index_store, local_tmp)
+            self._write_checkpoint(n_processed, store, index_store, local_tmp, secondary_stores)
             return
         if n_processed % ci == 0:
-            self._write_checkpoint(n_processed, store, index_store, local_tmp)
+            self._write_checkpoint(n_processed, store, index_store, local_tmp, secondary_stores)
 
     def _write_checkpoint(
         self,
         n_processed: int,
         store: StorePointer,
-        index_store: IndexStore,
+        index_store: IndexStore[Any],
         local_tmp: Path,
+        secondary_stores: list[tuple[IndexStore[Any], str]] | None = None,
     ) -> None:
         checkpoint_local = local_tmp / "db_checkpoint"
         index_store.checkpoint(checkpoint_local)
+        if secondary_stores:
+            for sec_store, _ in secondary_stores:
+                sec_store.checkpoint(checkpoint_local)
         store.put_dir(checkpoint_local, dest_name="db_checkpoint")
         logger.info("Checkpoint written after %d files.", n_processed)
 
@@ -250,7 +285,7 @@ def run(
     media: MediaSource,
     store: StorePointer,
     caption_model: CaptionModel,
-    index_store: IndexStore,
+    index_store: IndexStore[Any],
     index_store_name: str,
     folder: str | None = None,
     checkpoint_interval: int = 0,
@@ -299,7 +334,7 @@ def _run(
     media: MediaSource,
     store: StorePointer,
     caption_model: CaptionModel,
-    index_store: IndexStore,
+    index_store: IndexStore[Any],
     local_tmp: Path,
     index_store_name: str,
     folder: str | None = None,

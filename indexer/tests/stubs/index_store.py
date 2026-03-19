@@ -1,26 +1,26 @@
-"""Stub IndexStore — in-memory dict, no vectorization."""
+"""Stub IndexStore[CaptionItem] — in-memory dict, no vectorization."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
 
-from common.index import IndexResult, IndexStore
+from common.index import CaptionItem, IndexResult, IndexStore
 
 
-class StubIndexStore(IndexStore):
+class StubIndexStore(IndexStore[CaptionItem]):
     def __init__(self) -> None:
-        self.docs: dict[str, tuple[str, dict[str, str]]] = {}
+        self.docs: dict[str, tuple[CaptionItem, dict[str, str]]] = {}
         self._empty = False
 
-    def search(self, query: str, top_k: int) -> list[IndexResult]:
+    def search(self, query: CaptionItem, top_k: int) -> list[IndexResult[CaptionItem]]:
         results = []
-        for id_, (text, meta) in list(self.docs.items())[:top_k]:
+        for id_, (item, meta) in list(self.docs.items())[:top_k]:
             results.append(
                 IndexResult(
                     id=id_,
                     relative_path=meta.get("relative_path", id_),
-                    caption=meta.get("caption", text),
+                    item=item,
                     score=1.0,
                 )
             )
@@ -30,11 +30,11 @@ class StubIndexStore(IndexStore):
         entry = self.docs.get(id)
         return entry[1] if entry is not None else None
 
-    def add(self, id: str, text: str, metadata: dict[str, str]) -> None:
-        self.docs[id] = (text, metadata)
+    def add(self, id: str, item: CaptionItem, metadata: dict[str, str]) -> None:
+        self.docs[id] = (item, metadata)
 
-    def upsert(self, id: str, text: str, metadata: dict[str, str]) -> None:
-        self.docs[id] = (text, metadata)
+    def upsert(self, id: str, item: CaptionItem, metadata: dict[str, str]) -> None:
+        self.docs[id] = (item, metadata)
 
     def load(self, local_path: Path) -> None:
         pass

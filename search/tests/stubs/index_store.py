@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
-from common.index import IndexResult, IndexStore
+from common.index import CaptionItem, IndexResult, IndexStore
 
 
-class StubIndexStore(IndexStore):
-    def __init__(self, results: list[dict[str, Any]] | None = None) -> None:
-        self._raw: list[dict[str, Any]] = results or []
+class StubIndexStore(IndexStore[CaptionItem]):
+    def __init__(self, results: list[dict[str, str]] | None = None) -> None:
+        self._raw: list[dict[str, str]] = results or []
         self.loaded = False
 
-    def search(self, query: str, top_k: int) -> list[IndexResult]:
+    def search(self, query: CaptionItem, top_k: int) -> list[IndexResult[CaptionItem]]:
         out = []
         for raw in self._raw[:top_k]:
             known = {"id", "caption", "relative_path"}
@@ -23,7 +22,7 @@ class StubIndexStore(IndexStore):
                 IndexResult(
                     id=str(raw.get("id", "")),
                     relative_path=str(raw.get("relative_path", "")),
-                    caption=str(raw.get("caption", "")),
+                    item=CaptionItem(text=str(raw.get("caption", ""))),
                     score=1.0,
                     extra=extra,
                 )
@@ -33,10 +32,10 @@ class StubIndexStore(IndexStore):
     def get_metadata(self, id: str) -> dict[str, str] | None:
         return None
 
-    def add(self, id: str, text: str, metadata: dict[str, str]) -> None:
+    def add(self, id: str, item: CaptionItem, metadata: dict[str, str]) -> None:
         pass
 
-    def upsert(self, id: str, text: str, metadata: dict[str, str]) -> None:
+    def upsert(self, id: str, item: CaptionItem, metadata: dict[str, str]) -> None:
         pass
 
     def load(self, local_path: Path) -> None:

@@ -22,12 +22,14 @@ from typing import Any, Literal, Self
 INDEX_META_FILE = "index_meta.json"
 """Filename of the index metadata sidecar written inside the DB directory."""
 
-INDEXER_VERSION = "2.0.0"
+INDEXER_VERSION = "3.0.0"
 """Current indexer pipeline version.
 
-Bumped from 1.0.0: IndexMeta now records ``index_store`` instead of
-``vectorizer`` / ``vector_store``.  The indexer forces a full rebuild when
-the stored version differs from this constant.
+Bumped from 2.0.0: ChromaCaptionIndexStore now stores data under
+``db/captions/`` and face stores under ``db/faces/`` within the DB
+directory.  IndexMeta gains an optional ``face_store`` field.
+The indexer forces a full rebuild when the stored version differs from
+this constant.
 """
 
 # ---------------------------------------------------------------------------
@@ -227,12 +229,18 @@ class IndexMeta:
     indexed_at: datetime
     source: str
     index_store: str
-    """Dotted import path to the :class:`~common.index.IndexStore` implementation used.
+    """Dotted import path to the caption :class:`~common.index.IndexStore` implementation.
 
     Written by the indexer; read by the search server to resolve the right class.
     Example: ``"indexer.stores.chroma_caption.ChromaCaptionIndexStore"``
     """
     indexer_version: str = ""
+    face_store: str | None = None
+    """Optional dotted import path to the face :class:`~common.index.IndexStore` implementation.
+
+    Present only when the indexer includes face detection and clustering.
+    Example: ``"indexer.stores.chroma_face.ChromaFaceIndexStore"``
+    """
 
     @staticmethod
     def load(path: Path) -> IndexMeta:
@@ -263,6 +271,7 @@ class IndexMeta:
                 source=data["source"],
                 index_store=data["index_store"],
                 indexer_version=data.get("indexer_version", ""),
+                face_store=data.get("face_store"),
             )
         except (KeyError, ValueError) as exc:
             raise ValueError(f"Cannot parse field {exc} in {path}") from exc
@@ -272,6 +281,8 @@ class IndexMeta:
         path.parent.mkdir(parents=True, exist_ok=True)
         out = asdict(self)
         out["indexed_at"] = self.indexed_at.isoformat()
+        if out.get("face_store") is None:
+            out.pop("face_store", None)
         path.write_text(json.dumps(out, indent=2))
 
     @staticmethod
@@ -279,6 +290,7 @@ class IndexMeta:
         source: str,
         index_store: str,
         indexer_version: str = INDEXER_VERSION,
+        face_store: str | None = None,
     ) -> IndexMeta:
         """Construct an :class:`IndexMeta` stamped with the current UTC time."""
         return IndexMeta(
@@ -286,6 +298,7 @@ class IndexMeta:
             source=source,
             index_store=index_store,
             indexer_version=indexer_version,
+            face_store=face_store,
         )
 
 

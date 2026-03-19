@@ -1,6 +1,6 @@
 # Agent Dev Loop
 
-The implementation loop for Phase 2. All project-specific commands, thresholds,
+The implementation loop for code changes. All project-specific commands, thresholds,
 and package dependencies live in `.kdevkit/project.md` — read it first.
 
 ---
@@ -8,18 +8,16 @@ and package dependencies live in `.kdevkit/project.md` — read it first.
 ## The loop
 
 ```
-setup
+setup (create work branch)
  → code
  → quality gate  ◄──────────────────────────────────────────────┐
     fail: fix → re-run quality (max 1 retry, then proceed+note)  │
  → test gate                                                      │
     fail: fix → [non-trivial change? → re-run quality ───────────┘] → re-run test
- → auto-review
-    findings: fix → quality → test → re-run auto-review
  → dev: commit
- → PR review
+ → PR review gate
     findings: fix → quality → test → fixes: commit
- → push → human-ready
+ → merge work branch → return to caller
 ```
 
 Any stage can loop back to any prior stage. Quality is re-entered any time
@@ -39,7 +37,6 @@ of the feature from plan through human review:
 | `dev:` | After quality + test gates pass | What was implemented |
 | `review:` | After auto PR review (empty commit) | Review findings verbatim |
 | `fixes:` | After fix loop | How each finding was resolved |
-| `hfix:` | After human review changes | What the human asked for |
 
 Rules:
 - `plan:` and `review:` are **empty commits** (`--allow-empty`) — they anchor history, not code.
@@ -52,6 +49,15 @@ Rules:
 
 Run once per affected package at the start of every session (or after any environment
 file change). Use the setup command from `project.md`.
+
+**Create a work branch** off the current feature branch before writing any code:
+
+```bash
+git checkout -b work/<short-slug>-<timestamp>
+```
+
+All commits during the loop go to this branch. The work branch is merged back to
+the feature branch at the end (Stage 6).
 
 If a tool is missing or a dependency fails: fix the environment config file
 (`flake.nix`, `pyproject.toml`, `package.json`) — never add runtime guards in
@@ -82,8 +88,8 @@ application code or tests to paper over a broken environment.
 2. Zero failures required.
 3. For each failure: fix and re-run. Count each fix-and-rerun against `max_test_fix_attempts`
    from `project.md` (default 2).
-4. If still failing after the limit: **stop**. Do not push. Report the remaining failures
-   so the human can decide.
+4. If still failing after the limit: **stop**. Do not merge. Report the remaining failures
+   so the caller can decide.
 5. If the fix required non-trivial code changes, re-run Stage 1 once before continuing.
 
 ---
@@ -131,36 +137,37 @@ Address each finding from the PR review:
 
 ---
 
-## Stage 6 — Push
+## Stage 6 — Merge work branch and return
 
-Only after all affected packages pass all gates and fixes are committed:
+After all fixes are committed on the work branch, build the squash merge summary
+(see **Squash merge summary** below) from the work branch commit log:
 
 ```bash
-git push -u origin <feature-branch>
+git log --format="%h %s%n%b" $(git merge-base HEAD <feature-branch>)..HEAD
 ```
 
----
+Then merge using that summary as the commit message:
 
-## Stage 7 — Human review gate
+```bash
+git checkout <feature-branch>
+git merge --no-ff work/<slug> -m "<squash-merge-summary>"
+git branch -d work/<slug>
+```
 
-1. Ask the human to open a PR and paste the URL.
-2. `WebFetch` the PR diff URL → delegate to a review sub-agent (same as Stage 4) → present findings.
-3. Wait for human response:
-   - **Approve** → update feature file status to `ready-for-merge`. Do NOT merge.
-   - **Request changes** → fix → Stage 1 → Stage 2 → `hfix:` commit → push → repeat.
+Return control to the caller. Do not push. Do not interact with the human.
 
 ---
 
 ## Squash merge summary
 
-When the human asks for a squash merge summary, read the structured commit log —
-do not re-read the diff:
+Build the summary from the work branch commit log — do not re-read the diff.
+Read prefixed commits only:
 
 ```bash
-git log --format="%h %s%n%b" $(git merge-base HEAD main)..HEAD
+git log --format="%h %s%n%b" $(git merge-base HEAD <feature-branch>)..HEAD
 ```
 
-Build the summary from commit prefixes:
+Format:
 
 ```
 <one-line summary from plan: subject>

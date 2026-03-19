@@ -18,7 +18,9 @@ store = file:///absolute/path/to/your/store
 # Indexer (optional — defaults shown)
 # ---------------------------------------------------------------------------
 
-caption_model = blip2
+# blip2         — caption + EXIF only (faster, no face detection)
+# blip2_faces   — caption + EXIF + face detection/clustering (requires more RAM/time)
+caption_model = blip2_faces
 log_level     = INFO
 
 # Restrict indexing to a subfolder of the media source.
@@ -31,6 +33,11 @@ log_level     = INFO
 # A checkpoint lets a killed process leave a usable partial index in the store.
 # Set to 0 to disable checkpointing.
 # checkpoint_interval = 100
+
+# Cosine similarity threshold for face clustering (blip2_faces only).
+# Faces with similarity above this value are merged into the same cluster.
+# Lower values create more clusters; higher values merge more aggressively.
+# cluster_threshold = 0.6
 
 # ---------------------------------------------------------------------------
 # Search API (optional — defaults shown)

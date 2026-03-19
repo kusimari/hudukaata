@@ -15,6 +15,7 @@
 #   - actions/cache venvs       → installed Python venvs (torch, transformers, …)
 #   - actions/cache pip wheels  → downloaded .whl files
 #   - actions/cache hf-models   → BLIP-2 (~4 GB) + sentence-transformer (~100 MB)
+#   - actions/cache insightface → ArcFace/RetinaFace models (~100 MB, buffalo_l)
 #   - actions/cache npm         → node_modules
 #
 # First run: cold nix + model download; expect 30–60 min.
@@ -93,6 +94,16 @@ jobs:
           key: whisper-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml', 'indexer/src/indexer/models/blip2.py') }}
           restore-keys: |
             whisper-${{ runner.os }}-
+
+      # Cache InsightFace model weights (~100 MB for buffalo_l — detection + ArcFace).
+      # InsightFace downloads models to $INSIGHTFACE_HOME (set in flake.nix indexer shell).
+      # Key includes insightface.py so a model change busts the cache.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/insightface
+          key: insightface-${{ runner.os }}-${{ hashFiles('indexer/pyproject.toml', 'indexer/src/indexer/models/insightface.py') }}
+          restore-keys: |
+            insightface-${{ runner.os }}-
 
       - name: run e2e tests
         run: nix develop .#e2e --command pytest runner-scripts/e2e-test/test_e2e.py -v

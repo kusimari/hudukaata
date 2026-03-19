@@ -34,7 +34,6 @@ from typing import Any
 
 import click
 from common.base import StorePointer
-from common.index import IndexStore
 from common.media import MediaSource
 
 from indexer.batch import AdaptiveBatchController
@@ -81,7 +80,7 @@ def _build_blip2(config: Blip2SentTokExifChromaConfig) -> None:
     from indexer.stores.chroma_caption import ChromaCaptionIndexStore
 
     caption_model: CaptionModel = Blip2CaptionModel(load_in_8bit=config.load_in_8bit)
-    idx_store: IndexStore = ChromaCaptionIndexStore()
+    idx_store = ChromaCaptionIndexStore()
 
     indexer = Blip2SentTokExifChromaIndexer(
         caption_model=caption_model,
@@ -106,10 +105,81 @@ def _build_blip2(config: Blip2SentTokExifChromaConfig) -> None:
     )
 
 
+@dataclass
+class Blip2SentTokExifInsightfaceChromaConfig:
+    """Configuration for the face-aware indexer."""
+
+    media_uri: str = ""
+    store_uri: str = ""
+    folder: str | None = None
+    initial_batch_size: int = 1
+    max_batch_size: int = 32
+    adaptive_batch: bool = True
+    checkpoint_interval: int = 0
+    load_in_8bit: bool = False
+    cluster_threshold: float = 0.6
+    log_level: str = "INFO"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Blip2SentTokExifInsightfaceChromaConfig:
+        known = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+def _build_blip2_insightface(config: Blip2SentTokExifInsightfaceChromaConfig) -> None:
+    """Build and run the Blip2SentTokExifInsightfaceChromaIndexer pipeline."""
+    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
+
+    from indexer.indexers.blip2_sentok_exif_insightface_chroma import (
+        Blip2SentTokExifInsightfaceChromaIndexer,
+    )
+    from indexer.models.blip2 import Blip2CaptionModel
+    from indexer.models.insightface import InsightFaceModel
+    from indexer.stores.chroma_caption import ChromaCaptionIndexStore
+    from indexer.stores.chroma_face import ChromaFaceIndexStore
+
+    caption_model: CaptionModel = Blip2CaptionModel(load_in_8bit=config.load_in_8bit)
+    face_model = InsightFaceModel()
+    caption_store = ChromaCaptionIndexStore()
+    face_store = ChromaFaceIndexStore()
+
+    indexer = Blip2SentTokExifInsightfaceChromaIndexer(
+        caption_model=caption_model,
+        face_model=face_model,
+        caption_store=caption_store,
+        face_store=face_store,
+        cluster_threshold=config.cluster_threshold,
+    )
+    ctrl = AdaptiveBatchController(
+        initial_size=config.initial_batch_size,
+        max_size=config.max_batch_size,
+        adaptive=config.adaptive_batch,
+    )
+    runner = IndexingRunner(
+        pipeline_runner=AdaptiveBatchRunner(ctrl),
+        checkpoint_interval=config.checkpoint_interval,
+    )
+    runner.run(
+        pipeline=indexer.pipeline(),
+        media=MediaSource.from_uri(config.media_uri),
+        store=StorePointer.parse(config.store_uri),
+        index_store=caption_store,
+        index_store_name="indexer.stores.chroma_caption.ChromaCaptionIndexStore",
+        folder=config.folder,
+        secondary_stores=[
+            (face_store, "indexer.stores.chroma_face.ChromaFaceIndexStore"),
+        ],
+    )
+
+
 _RegistryEntry = tuple[type[Any], Callable[[Any], None]]
 
 _REGISTRY: dict[str, _RegistryEntry] = {
     "blip2_sentok_exif_chroma": (Blip2SentTokExifChromaConfig, _build_blip2),
+    "blip2_sentok_exif_insightface_chroma": (
+        Blip2SentTokExifInsightfaceChromaConfig,
+        _build_blip2_insightface,
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -180,7 +250,7 @@ def index_legacy(
     from indexer.stores.chroma_caption import ChromaCaptionIndexStore
 
     caption_model: CaptionModel = Blip2CaptionModel(load_in_8bit=load_in_8bit)
-    idx_store: IndexStore = ChromaCaptionIndexStore()
+    idx_store = ChromaCaptionIndexStore()
 
     run(
         MediaSource.from_uri(media),

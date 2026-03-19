@@ -13,12 +13,14 @@ IndexStore implementation by dotted class path.
 """
 
 from common.base import IndexMeta, StorePointer
-from common.index import IndexResult, IndexStore
+from common.index import CaptionItem, FaceItem, IndexResult, IndexStore
 from common.media import MediaFile, MediaSource
 
 __all__ = [
     "IndexMeta",
     "StorePointer",
+    "CaptionItem",
+    "FaceItem",
     "IndexResult",
     "IndexStore",
     "MediaFile",

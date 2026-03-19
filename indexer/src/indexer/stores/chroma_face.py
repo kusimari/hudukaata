@@ -1,7 +1,13 @@
-"""ChromaCaptionIndexStore — Chroma + SentenceTransformer implementation of IndexStore[CaptionItem].
+"""ChromaFaceIndexStore — ChromaDB implementation of IndexStore[FaceItem].
 
-All vectorization is internal.  Callers pass and receive :class:`~common.index.CaptionItem`
-objects.  The ChromaDB data lives under ``<db_path>/captions/``.
+Stores face cluster centroids as ChromaDB vectors.  Data lives under
+``<db_path>/faces/`` so that caption and face stores can share the same
+``db_path`` root.
+
+:meth:`list_all` returns clusters sorted by frequency (count) — used by the
+``GET /faces`` endpoint to populate the face ribbon.
+:meth:`search` finds the nearest clusters to a query face embedding — used
+for face-similarity lookup.
 """
 
 from __future__ import annotations
@@ -13,32 +19,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from common.index import CaptionItem, IndexResult, IndexStore
+from common.index import FaceItem, IndexResult, IndexStore
 
-from indexer.vectorizers.base import Vectorizer
-
-_META_FILE = "db_meta.json"
-_COLLECTION_NAME = "media"
-_SUB_DIR = "captions"
+_META_FILE = "face_db_meta.json"
+_COLLECTION_NAME = "faces"
+_SUB_DIR = "faces"
 
 
-class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
-    """Caption-based semantic search: SentenceTransformer vectors + ChromaDB storage.
+class ChromaFaceIndexStore(IndexStore[FaceItem]):
+    """Face cluster store: SentenceTransformer-dimension-free, vector-direct storage.
 
-    ChromaDB data is stored under ``<db_path>/captions/`` so that caption and
-    face stores can share the same ``db_path`` root.
+    Each document is a face cluster identified by a UUID *cluster_id*.
+    The stored vector is the cluster centroid.  Metadata records:
+    - ``count`` — number of face detections assigned to this cluster
+    - ``representative_path`` — ``relative_path`` of a representative image
+    - ``image_paths`` — comma-separated list of all images containing this face
 
-    Inject *vectorizer* for testing; leave ``None`` to use the default
-    :class:`~indexer.vectorizers.sentence_transformer.SentenceTransformerVectorizer`.
+    ChromaDB data is stored under ``<db_path>/faces/``.
     """
 
-    def __init__(self, vectorizer: Vectorizer | None = None) -> None:
-        if vectorizer is not None:
-            self._vec: Vectorizer = vectorizer
-        else:
-            from indexer.vectorizers.sentence_transformer import SentenceTransformerVectorizer
-
-            self._vec = SentenceTransformerVectorizer()
+    def __init__(self) -> None:
         self._client: Any = None
         self._collection: Any = None
         self._tmp_dir: Path | None = None
@@ -52,38 +52,51 @@ class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
     def _require_collection(self) -> Any:
         if self._collection is None:
             raise RuntimeError(
-                "ChromaCaptionIndexStore not initialised. Call load() or create_empty() first."
+                "ChromaFaceIndexStore not initialised. Call load() or create_empty() first."
             )
         return self._collection
+
+    def _get_embedding_dim(self) -> int | None:
+        """Return embedding dimension from the first stored vector, or None if empty."""
+        col = self._require_collection()
+        if col.count() == 0:
+            return None
+        sample = col.get(limit=1, include=["embeddings"])
+        embs = sample.get("embeddings") or []
+        return len(embs[0]) if embs else None
 
     # ------------------------------------------------------------------
     # IndexStore — read
     # ------------------------------------------------------------------
 
-    def search(self, query: CaptionItem, top_k: int) -> list[IndexResult[CaptionItem]]:
+    def search(self, query: FaceItem, top_k: int) -> list[IndexResult[FaceItem]]:
+        """Return the *top_k* face clusters nearest to *query.embedding*."""
         col = self._require_collection()
-        vector = self._vec.vectorize(query.text)
         effective_n = min(top_k, col.count())
         if effective_n == 0:
             return []
         results = col.query(
-            query_embeddings=[vector],
+            query_embeddings=[query.embedding],
             n_results=effective_n,
-            include=["metadatas", "distances"],
+            include=["metadatas", "distances", "embeddings"],
         )
-        out: list[IndexResult[CaptionItem]] = []
+        out: list[IndexResult[FaceItem]] = []
         ids = results.get("ids", [[]])[0]
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
-        for id_, meta, dist in zip(ids, metadatas, distances, strict=True):
+        embeddings = results.get("embeddings", [[]])[0]
+        for id_, meta, dist, emb in zip(ids, metadatas, distances, embeddings, strict=True):
             score = max(0.0, 1.0 - dist)
             out.append(
                 IndexResult(
                     id=id_,
-                    relative_path=meta.get("relative_path", id_),
-                    item=CaptionItem(text=meta.get("caption", "")),
+                    relative_path=meta.get("representative_path", id_),
+                    item=FaceItem(embedding=list(emb), cluster_id=id_),
                     score=score,
-                    extra={k: v for k, v in meta.items() if k not in ("relative_path", "caption")},
+                    extra={
+                        "count": meta.get("count", "0"),
+                        "image_paths": meta.get("image_paths", ""),
+                    },
                 )
             )
         return out
@@ -98,35 +111,68 @@ class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
             }
         return self._meta_cache.get(id)
 
+    def list_all(self, top_k: int) -> list[IndexResult[FaceItem]]:
+        """Return clusters sorted by frequency (descending count)."""
+        col = self._require_collection()
+        total = col.count()
+        if total == 0:
+            return []
+        results = col.get(include=["metadatas", "embeddings"])
+        ids: list[str] = results.get("ids", [])
+        metadatas: list[dict[str, str]] = results.get("metadatas", [])
+        embeddings: list[list[float]] = results.get("embeddings", [])
+
+        rows: list[tuple[int, str, dict[str, str], list[float]]] = []
+        for id_, meta, emb in zip(ids, metadatas, embeddings, strict=True):
+            count = int(meta.get("count", "0"))
+            rows.append((count, id_, meta, list(emb)))
+
+        rows.sort(key=lambda r: r[0], reverse=True)
+        max_count = rows[0][0] if rows else 1
+
+        out: list[IndexResult[FaceItem]] = []
+        for count, id_, meta, emb in rows[:top_k]:
+            out.append(
+                IndexResult(
+                    id=id_,
+                    relative_path=meta.get("representative_path", id_),
+                    item=FaceItem(embedding=emb, cluster_id=id_),
+                    score=count / max(max_count, 1),
+                    extra={
+                        "count": str(count),
+                        "image_paths": meta.get("image_paths", ""),
+                    },
+                )
+            )
+        return out
+
     # ------------------------------------------------------------------
     # IndexStore — write
     # ------------------------------------------------------------------
 
-    def add(self, id: str, item: CaptionItem, metadata: dict[str, str]) -> None:
+    def add(self, id: str, item: FaceItem, metadata: dict[str, str]) -> None:
         col = self._require_collection()
-        vector = self._vec.vectorize(item.text)
-        col.add(ids=[id], embeddings=[vector], metadatas=[metadata])
+        col.add(ids=[id], embeddings=[item.embedding], metadatas=[metadata])
+        if self._meta_cache is not None:
+            self._meta_cache[id] = metadata
 
-    def upsert(self, id: str, item: CaptionItem, metadata: dict[str, str]) -> None:
+    def upsert(self, id: str, item: FaceItem, metadata: dict[str, str]) -> None:
         col = self._require_collection()
-        vector = self._vec.vectorize(item.text)
-        col.upsert(ids=[id], embeddings=[vector], metadatas=[metadata])
+        col.upsert(ids=[id], embeddings=[item.embedding], metadatas=[metadata])
         if self._meta_cache is not None:
             self._meta_cache[id] = metadata
 
     def upsert_batch(
         self,
         ids: list[str],
-        items: list[CaptionItem],
+        items: list[FaceItem],
         metadatas: list[dict[str, str]],
     ) -> None:
-        """Vectorise all captions in one encoder pass and write to ChromaDB in one call."""
         if not ids:
             return
         col = self._require_collection()
-        texts = [item.text for item in items]
-        vectors = self._vec.vectorize_batch(texts)
-        col.upsert(ids=ids, embeddings=vectors, metadatas=metadatas)
+        embeddings = [item.embedding for item in items]
+        col.upsert(ids=ids, embeddings=embeddings, metadatas=metadatas)
         if self._meta_cache is not None:
             for id_, meta in zip(ids, metadatas, strict=True):
                 self._meta_cache[id_] = meta
@@ -139,16 +185,6 @@ class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
         import chromadb
         from chromadb.config import Settings
 
-        # Detect old layout (pre-3.0.0): ChromaDB data was stored directly in
-        # local_path instead of local_path/captions/.  A chroma.sqlite3 file at
-        # the root is the tell-tale sign.
-        if (local_path / "chroma.sqlite3").exists() and not (local_path / _SUB_DIR).exists():
-            raise RuntimeError(
-                f"Index at {local_path} uses the old pre-3.0.0 layout "
-                f"(ChromaDB data at root instead of {local_path / _SUB_DIR}). "
-                "Re-run the indexer to rebuild the index with the current layout."
-            )
-
         self._client = chromadb.PersistentClient(
             path=str(local_path / _SUB_DIR),
             settings=Settings(anonymized_telemetry=False),
@@ -159,7 +195,7 @@ class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
         import chromadb
         from chromadb.config import Settings
 
-        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_cap_"))
+        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_face_"))
         try:
             client = chromadb.PersistentClient(
                 path=str(tmp_dir / _SUB_DIR),
@@ -189,7 +225,6 @@ class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
         created_ts = (self._created_at or datetime.now(UTC)).isoformat()
         self._created_at = None
         try:
-            (tmp_dir / _META_FILE).write_text(json.dumps({"created_at": created_ts}))
             dest = local_path / _SUB_DIR
             if dest.exists():
                 shutil.rmtree(dest)
@@ -215,7 +250,9 @@ class ChromaCaptionIndexStore(IndexStore[CaptionItem]):
         from chromadb.config import Settings
 
         src = local_path / _SUB_DIR
-        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_cap_upd_"))
+        if not src.exists():
+            raise FileNotFoundError(f"Face store directory not found: {src}")
+        tmp_dir = Path(tempfile.mkdtemp(prefix="chroma_face_upd_"))
         try:
             shutil.copytree(str(src), str(tmp_dir / _SUB_DIR))
             client = chromadb.PersistentClient(
