@@ -111,7 +111,7 @@ class TestCaptionStage:
     def test_empty_input(self) -> None:
         assert caption_stage(StubCaptionModel())[0].fn([]) == []
 
-    def test_failed_caption_drops_all_and_closes_stacks(self) -> None:
+    def test_failed_caption_marks_items_failed_and_does_not_close_stacks(self) -> None:
         items = [self._open_item("a.jpg"), self._open_item("b.jpg")]
         closed: list[str] = []
 
@@ -131,8 +131,11 @@ class TestCaptionStage:
         with patch("indexer.stages.logger"):
             result = fn(items)
 
-        assert result == []
-        assert set(closed) == {"a.jpg", "b.jpg"}
+        # All items are returned with _failed=True; drop_failed_stage handles cleanup.
+        assert len(result) == 2
+        assert all(item._failed for item in result)
+        # Stacks are not closed here — that is drop_failed_stage's responsibility.
+        assert closed == []
 
 
 # ---------------------------------------------------------------------------

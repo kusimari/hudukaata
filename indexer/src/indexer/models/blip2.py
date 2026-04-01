@@ -86,11 +86,22 @@ class Blip2CaptionModel(CaptionModel):
     # Public API
     # ------------------------------------------------------------------
 
-    def caption_batch(self, mfs: list[MediaFile]) -> list[str]:
+    def caption_batch(
+        self,
+        mfs: list[MediaFile],
+        pil_images: list[object] | None = None,
+    ) -> list[str]:
         """Caption a batch, using a single BLIP-2 forward pass for images.
 
         Video and audio files are processed individually (they require
         per-file frame extraction / Whisper transcription).
+
+        Args:
+            mfs: Media files to caption.
+            pil_images: Optional pre-loaded PIL ``Image`` objects supplied by
+                :class:`~indexer.pipeline.PrefetchSource`.  When an entry is
+                not ``None``, it is used directly instead of opening the file
+                from disk, avoiding redundant IO during GPU inference.
         """
         if not mfs:
             return []
@@ -107,9 +118,15 @@ class Blip2CaptionModel(CaptionModel):
 
                 self._load_blip2()
                 device = self._get_device()
-                pil_images = [Image.open(mfs[i].local_path).convert("RGB") for i in image_indices]
+                # Use pre-loaded PIL images when available; fall back to disk otherwise.
+                loaded: list[object] = []
+                for i in image_indices:
+                    pre = pil_images[i] if pil_images is not None else None
+                    loaded.append(
+                        pre if pre is not None else Image.open(mfs[i].local_path).convert("RGB")
+                    )
                 torch_dtype = torch.float16 if device == "cuda" else torch.float32
-                inputs = self._processor(images=pil_images, return_tensors="pt", padding=True).to(
+                inputs = self._processor(images=loaded, return_tensors="pt", padding=True).to(
                     device, torch_dtype
                 )
                 generated_ids = self._model.generate(**inputs, max_new_tokens=self.max_new_tokens)

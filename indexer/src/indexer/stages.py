@@ -53,24 +53,47 @@ def open_stage() -> list[Stage]:
 
 
 def caption_stage(model: CaptionModel) -> list[Stage]:
-    """Caption all items in one model forward pass; drop all on failure."""
+    """Caption all items in one model forward pass.
+
+    On failure, items are marked ``_failed=True`` and returned so that a
+    downstream :func:`drop_failed_stage` can close their stacks and filter
+    them out.  Stacks are never closed here, making this stage safe to run
+    concurrently with ``faces_stage`` and ``exif_stage`` inside a
+    :class:`~indexer.pipeline.ParallelStage`.
+    """
 
     def fn(items: list[BatchItem]) -> list[BatchItem]:
         if not items:
             return items
         mfs = [item.media_file for item in items]
+        pil_images = [item.pil_image for item in items]
         try:
-            captions = model.caption_batch(mfs)
+            captions = model.caption_batch(mfs, pil_images=pil_images)
             for item, caption in zip(items, captions, strict=True):
                 item.caption = caption
+                item.pil_image = None  # release memory once the GPU is done
         except Exception as exc:
             logger.warning("caption_batch failed for batch of %d: %s", len(items), exc)
             for item in items:
-                item._stack.close()
-            return []
+                item._failed = True
         return items
 
     return [Stage(fn, batched=True)]
+
+
+def drop_failed_stage() -> list[Stage]:
+    """Close stacks and discard items marked ``_failed`` by an upstream stage."""
+
+    def fn(items: list[BatchItem]) -> list[BatchItem]:
+        ok: list[BatchItem] = []
+        for item in items:
+            if item._failed:
+                item._stack.close()
+            else:
+                ok.append(item)
+        return ok
+
+    return [Stage(fn, batched=False)]
 
 
 def exif_stage() -> list[Stage]:

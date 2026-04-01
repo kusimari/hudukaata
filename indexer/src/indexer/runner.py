@@ -33,7 +33,13 @@ from tqdm import tqdm
 from indexer.batch import AdaptiveBatchController
 from indexer.indexers.blip2_sentok_exif_chroma import Blip2SentTokExifChromaIndexer
 from indexer.models.base import CaptionModel
-from indexer.pipeline import AdaptiveBatchRunner, BatchItem, OneByOneRunner, Pipeline
+from indexer.pipeline import (
+    AdaptiveBatchRunner,
+    BatchItem,
+    OneByOneRunner,
+    Pipeline,
+    PrefetchSource,
+)
 from indexer.swap import cleanup_stale_tmp, commit, prepare_temp_dir
 
 logger = logging.getLogger(__name__)
@@ -61,9 +67,15 @@ class IndexingRunner:
         self,
         pipeline_runner: AdaptiveBatchRunner | OneByOneRunner,
         checkpoint_interval: int = 0,
+        prefetch: bool = False,
+        max_prefetch: int = 8,
+        prefetch_workers: int = 4,
     ) -> None:
         self._runner = pipeline_runner
         self._checkpoint_interval = checkpoint_interval
+        self._prefetch = prefetch
+        self._max_prefetch = max_prefetch
+        self._prefetch_workers = prefetch_workers
 
     # ------------------------------------------------------------------
     # Public API
@@ -131,10 +143,23 @@ class IndexingRunner:
             f" (folder={folder!r})" if folder else "",
         )
 
-        source = self._scan_and_skip(media, folder, index_store, force_reindex)
+        raw_source = self._scan_and_skip(media, folder, index_store, force_reindex)
+        prefetch_src: PrefetchSource | None = None
+        if self._prefetch:
+            prefetch_src = PrefetchSource(raw_source, self._max_prefetch, self._prefetch_workers)
+            logger.info(
+                "IO prefetch enabled (max_prefetch=%d, workers=%d).",
+                self._max_prefetch,
+                self._prefetch_workers,
+            )
+        source = iter(prefetch_src) if prefetch_src is not None else raw_source
 
-        for processed, _ in enumerate(self._runner.stream(pipeline, source), 1):
-            self._maybe_checkpoint(processed, store, index_store, local_tmp, secondary_stores)
+        try:
+            for processed, _ in enumerate(self._runner.stream(pipeline, source), 1):
+                self._maybe_checkpoint(processed, store, index_store, local_tmp, secondary_stores)
+        finally:
+            if prefetch_src is not None:
+                prefetch_src.close()
 
         db_new_path = local_tmp / "db_new"
         index_store.save(db_new_path)

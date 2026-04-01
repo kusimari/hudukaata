@@ -151,10 +151,18 @@ class TestUpsertCaptionsStage:
 
 
 class TestPipeline:
-    def test_pipeline_has_eight_stages(self) -> None:
+    def test_pipeline_has_seven_stages(self) -> None:
+        # open, ParallelStage([caption, faces, exif]), drop_failed,
+        # assign_clusters, format_text, upsert, close
         pipeline = _indexer().pipeline()
-        assert len(pipeline) == 8
+        assert len(pipeline) == 7
 
     def test_pipeline_stages_are_callable(self) -> None:
-        for stage in _indexer().pipeline():
-            assert callable(stage.fn)
+        from indexer.pipeline import ParallelStage, Stage
+
+        for step in _indexer().pipeline():
+            if isinstance(step, ParallelStage):
+                assert all(callable(s.fn) for s in step.stages)
+            else:
+                assert isinstance(step, Stage)
+                assert callable(step.fn)

@@ -60,6 +60,9 @@ class Blip2SentTokExifChromaConfig:
     checkpoint_interval: int = 0
     load_in_8bit: bool = False
     log_level: str = "INFO"
+    prefetch: bool = False
+    max_prefetch: int = 8
+    prefetch_workers: int = 4
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Blip2SentTokExifChromaConfig:
@@ -94,6 +97,9 @@ def _build_blip2(config: Blip2SentTokExifChromaConfig) -> None:
     runner = IndexingRunner(
         pipeline_runner=AdaptiveBatchRunner(ctrl),
         checkpoint_interval=config.checkpoint_interval,
+        prefetch=config.prefetch,
+        max_prefetch=config.max_prefetch,
+        prefetch_workers=config.prefetch_workers,
     )
     runner.run(
         pipeline=indexer.pipeline(),
@@ -119,6 +125,9 @@ class Blip2SentTokExifInsightfaceChromaConfig:
     load_in_8bit: bool = False
     cluster_threshold: float = 0.6
     log_level: str = "INFO"
+    prefetch: bool = False
+    max_prefetch: int = 8
+    prefetch_workers: int = 4
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Blip2SentTokExifInsightfaceChromaConfig:
@@ -158,6 +167,9 @@ def _build_blip2_insightface(config: Blip2SentTokExifInsightfaceChromaConfig) ->
     runner = IndexingRunner(
         pipeline_runner=AdaptiveBatchRunner(ctrl),
         checkpoint_interval=config.checkpoint_interval,
+        prefetch=config.prefetch,
+        max_prefetch=config.max_prefetch,
+        prefetch_workers=config.prefetch_workers,
     )
     runner.run(
         pipeline=indexer.pipeline(),

@@ -1,10 +1,12 @@
 """Blip2SentTokExifInsightfaceChromaIndexer — caption + faces + EXIF + ChromaDB.
 
 This indexer extends the caption-only pipeline with face detection and
-incremental clustering:
+incremental clustering.  Caption, face detection, and EXIF extraction run
+concurrently via :class:`~indexer.pipeline.ParallelStage`:
 
-  open → caption (batched) → faces (batched) → exif
-       → assign_clusters → format_text → upsert_captions (batched) → close
+  open → ParallelStage([caption, faces, exif])
+       → drop_failed → assign_clusters → format_text
+       → upsert_captions (batched) → close
 
 Face detection uses :class:`~indexer.models.insightface.InsightFaceModel`.
 Clustering is done incrementally by :class:`~indexer.face_cluster.FaceClusterer`;
@@ -22,11 +24,12 @@ from indexer.batch import AdaptiveBatchController
 from indexer.face_cluster import FaceClusterer
 from indexer.models.base import CaptionModel
 from indexer.models.insightface import InsightFaceModel
-from indexer.pipeline import Pipeline
+from indexer.pipeline import ParallelStage, Pipeline
 from indexer.stages import (
     assign_clusters_stage,
     caption_stage,
     close_stage,
+    drop_failed_stage,
     exif_stage,
     faces_stage,
     format_text_stage,
@@ -66,13 +69,19 @@ class Blip2SentTokExifInsightfaceChromaIndexer:
 
     def pipeline(self) -> Pipeline:
         """Return the ordered list of :class:`~indexer.pipeline.Stage` objects."""
+        parallel = ParallelStage(
+            [
+                caption_stage(self._caption_model)[0],
+                faces_stage(self._face_model)[0],
+                exif_stage()[0],
+            ]
+        )
         return list(
             tz.concat(
                 [
                     open_stage(),
-                    caption_stage(self._caption_model),
-                    faces_stage(self._face_model),
-                    exif_stage(),
+                    [parallel],
+                    drop_failed_stage(),
                     assign_clusters_stage(self._clusterer),
                     format_text_stage(),
                     upsert_captions_stage(self._caption_store),
